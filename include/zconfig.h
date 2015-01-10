@@ -42,6 +42,11 @@ CZMQ_EXPORT char *
 CZMQ_EXPORT void
     zconfig_put (zconfig_t *self, const char *path, const char *value);
 
+//  Equivalent to zconfig_put, accepting a format specifier and variable
+//  argument list, instead of a single string value.
+CZMQ_EXPORT void
+    zconfig_putf (zconfig_t *self, const char *path, const char *format, ...);
+    
 //  Set config item name, name may be NULL
 CZMQ_EXPORT void
     zconfig_set_name (zconfig_t *self, const char *name);
@@ -93,7 +98,9 @@ CZMQ_EXPORT void
 CZMQ_EXPORT zlist_t *
     zconfig_comments (zconfig_t *self);
 
-//  Load a config tree from a specified ZPL text file
+//  Load a config tree from a specified ZPL text file; returns a zconfig_t
+//  reference for the root, if the file exists and is readable. Returns NULL
+//  if the file does not exist.
 CZMQ_EXPORT zconfig_t *
     zconfig_load (const char *filename);
 
@@ -102,6 +109,16 @@ CZMQ_EXPORT zconfig_t *
 CZMQ_EXPORT int
     zconfig_save (zconfig_t *self, const char *filename);
 
+//  Equivalent to zconfig_load, taking a format string instead of a fixed
+//  filename.
+CZMQ_EXPORT zconfig_t *
+    zconfig_loadf (const char *format, ...);
+
+//  Equivalent to zconfig_save, taking a format string instead of a fixed
+//  filename.
+CZMQ_EXPORT int
+    zconfig_savef (zconfig_t *self, const char *format, ...);
+    
 //  Report filename used during zconfig_load, or NULL if none
 CZMQ_EXPORT char *
     zconfig_filename (zconfig_t *self);

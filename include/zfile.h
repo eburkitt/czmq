@@ -104,15 +104,24 @@ CZMQ_EXPORT int
     zfile_output (zfile_t *self);
 
 //  Read chunk from file at specified position. If this was the last chunk,
-//  sets self->eof. Returns a null chunk in case of error.
+//  sets the eof property. Returns a null chunk in case of error.
 CZMQ_EXPORT zchunk_t *
     zfile_read (zfile_t *self, size_t bytes, off_t offset);
 
+//  Returns true if zfile_read() just read the last chunk in the file.
+CZMQ_EXPORT bool
+    zfile_eof (zfile_t *self);
+    
 //  Write chunk to file at specified position
 //  Return 0 if OK, else -1
 CZMQ_EXPORT int
     zfile_write (zfile_t *self, zchunk_t *chunk, off_t offset);
 
+//  Read next line of text from file. Returns a pointer to the text line,
+//  or NULL if there was nothing more to read from the file.
+CZMQ_EXPORT const char *
+    zfile_readln (zfile_t *self);
+    
 //  Close file, if open
 CZMQ_EXPORT void
     zfile_close (zfile_t *self);
@@ -121,9 +130,8 @@ CZMQ_EXPORT void
 CZMQ_EXPORT FILE *
     zfile_handle (zfile_t *self);
 
-//  Calculate SHA1 digest for file, using zdigest class. Caller should not
-//  modify digest.
-CZMQ_EXPORT char *
+//  Calculate SHA1 digest for file, using zdigest class.
+CZMQ_EXPORT const char *
     zfile_digest (zfile_t *self);
 
 //  Self test of this class
