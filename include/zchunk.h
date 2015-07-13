@@ -54,9 +54,16 @@ CZMQ_EXPORT size_t
 CZMQ_EXPORT size_t
     zchunk_fill (zchunk_t *self, byte filler, size_t size);
 
-//  Append user-supplied data to chunk, return resulting chunk size
+//  Append user-supplied data to chunk, return resulting chunk size. If the
+//  data would exceeed the available space, it is truncated. If you want to
+//  grow the chunk to accomodate new data, use the zchunk_extend method.
 CZMQ_EXPORT size_t
     zchunk_append (zchunk_t *self, const void *data, size_t size);
+
+//  Append user-supplied data to chunk, return resulting chunk size. If the
+//  data would exceeed the available space, the chunk grows in size.
+CZMQ_EXPORT size_t
+    zchunk_extend (zchunk_t *self, const void *data, size_t size);
 
 //  Copy as much data from 'source' into the chunk as possible; returns the
 //  new size of chunk. If all data from 'source' is used, returns exhausted
@@ -73,7 +80,7 @@ CZMQ_EXPORT bool
 //  Read chunk from an open file descriptor
 CZMQ_EXPORT zchunk_t *
     zchunk_read (FILE *handle, size_t bytes);
-    
+
 //  Write chunk to an open file descriptor
 CZMQ_EXPORT int
     zchunk_write (zchunk_t *self, FILE *handle);
@@ -112,6 +119,10 @@ CZMQ_EXPORT zframe_t *
 //  Transform a zframe into a zchunk.
 CZMQ_EXPORT zchunk_t *
     zchunk_unpack (zframe_t *frame);
+
+//  Calculate SHA1 digest for chunk, using zdigest class.
+CZMQ_EXPORT const char *
+    zchunk_digest (zchunk_t *self);
 
 //  Dump chunk to FILE stream, for debugging and tracing.
 CZMQ_EXPORT void

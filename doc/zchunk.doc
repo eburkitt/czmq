@@ -4,6 +4,7 @@ The zchunk class works with variable sized blobs. Not as efficient as
 MQ's messages but they do less weirdness and so are easier to understand.
 The chunk class has methods to read and write chunks from disk.
 
+Please add @discuss section in ../src/zchunk.c.
 
 This is the class interface:
 
@@ -42,9 +43,16 @@ This is the class interface:
     CZMQ_EXPORT size_t
         zchunk_fill (zchunk_t *self, byte filler, size_t size);
     
-    //  Append user-supplied data to chunk, return resulting chunk size
+    //  Append user-supplied data to chunk, return resulting chunk size. If the
+    //  data would exceeed the available space, it is truncated. If you want to
+    //  grow the chunk to accomodate new data, use the zchunk_extend method.
     CZMQ_EXPORT size_t
         zchunk_append (zchunk_t *self, const void *data, size_t size);
+    
+    //  Append user-supplied data to chunk, return resulting chunk size. If the
+    //  data would exceeed the available space, the chunk grows in size.
+    CZMQ_EXPORT size_t
+        zchunk_extend (zchunk_t *self, const void *data, size_t size);
     
     //  Copy as much data from 'source' into the chunk as possible; returns the
     //  new size of chunk. If all data from 'source' is used, returns exhausted
@@ -61,7 +69,7 @@ This is the class interface:
     //  Read chunk from an open file descriptor
     CZMQ_EXPORT zchunk_t *
         zchunk_read (FILE *handle, size_t bytes);
-        
+    
     //  Write chunk to an open file descriptor
     CZMQ_EXPORT int
         zchunk_write (zchunk_t *self, FILE *handle);
@@ -101,6 +109,10 @@ This is the class interface:
     CZMQ_EXPORT zchunk_t *
         zchunk_unpack (zframe_t *frame);
     
+    //  Calculate SHA1 digest for chunk, using zdigest class.
+    CZMQ_EXPORT const char *
+        zchunk_digest (zchunk_t *self);
+    
     //  Dump chunk to FILE stream, for debugging and tracing.
     CZMQ_EXPORT void
         zchunk_fprint (zchunk_t *self, FILE *file);
@@ -134,6 +146,7 @@ This is the class self test code:
     assert (memcmp (zchunk_data (chunk), "1234567890", 10) == 0);
     assert (zchunk_size (chunk) == 10);
     assert (zchunk_streq (chunk, "1234567890"));
+    assert (streq (zchunk_digest (chunk), "01B307ACBA4F54F55AAFC33BB06BBBF6CA803E9A"));
     char *string = zchunk_strdup (chunk);
     assert (streq (string, "1234567890"));
     free (string);
@@ -155,6 +168,14 @@ This is the class self test code:
     assert (memcmp (zchunk_data (copy), "1234567890", 10) == 0);
     assert (zchunk_size (copy) == 10);
     zchunk_destroy (&copy);
+    zchunk_destroy (&chunk);
+    
+    chunk = zchunk_new (NULL, 0);
+    zchunk_extend (chunk, "12345678", 8);
+    zchunk_extend (chunk, "90ABCDEF", 8);
+    zchunk_extend (chunk, "GHIJKLMN", 8);
+    assert (zchunk_size (chunk) == 24);
+    assert (zchunk_streq (chunk, "1234567890ABCDEFGHIJKLMN"));
     zchunk_destroy (&chunk);
     
     copy = zchunk_new ("1234567890abcdefghij", 20);

@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zproxy - run a steerable proxy in the background
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -101,7 +101,7 @@ s_self_configure (self_t *self, zsock_t **sock_p, zmsg_t *request, char *name)
     char *endpoints = zmsg_popstr (request);
     assert (endpoints);
     if (self->verbose)
-        zsys_info ("zmonitor: - %s type=%s attach=%s", name, type_name, endpoints);
+        zsys_info ("zproxy: - %s type=%s attach=%s", name, type_name, endpoints);
     assert (*sock_p == NULL);
     *sock_p = s_create_socket (type_name, endpoints);
     assert (*sock_p);
@@ -190,14 +190,14 @@ s_self_switch (self_t *self, zsock_t *input, zsock_t *output)
     //  We use the low-level libzmq API for best performance
     void *zmq_input = zsock_resolve (input);
     void *zmq_output = zsock_resolve (output);
-    void *zmq_capture = self->capture ? zsock_resolve (self->capture) : NULL;
+    void *zmq_capture = self->capture? zsock_resolve (self->capture): NULL;
 
     zmq_msg_t msg;
     zmq_msg_init (&msg);
     while (true) {
         if (zmq_recvmsg (zmq_input, &msg, ZMQ_DONTWAIT) == -1)
             break;      //  Presumably EAGAIN
-        int send_flags = zsock_rcvmore (zmq_input) ? ZMQ_SNDMORE : 0;
+        int send_flags = zsock_rcvmore (zmq_input)? ZMQ_SNDMORE: 0;
         if (zmq_capture) {
             zmq_msg_t dup;
             zmq_msg_init (&dup);

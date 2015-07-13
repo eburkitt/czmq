@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zmsg - working with multipart messages
 
     -------------------------------------------------------------------------
@@ -143,11 +143,43 @@ zmsg_send (zmsg_t **self_p, void *dest)
                 break;
             frame = (zframe_t *) zlist_pop (self->frames);
         }
-        zmsg_destroy (self_p);
+        if (rc == 0)
+            zmsg_destroy (self_p);
     }
     return rc;
 }
 
+//  --------------------------------------------------------------------------
+//  Send message to destination socket as part of a multipart sequence, and
+//  destroy the message after sending it successfully. Note that after a
+//  zmsg_sendm, you must call zmsg_send or another method that sends a final
+//  message part. If the message has no frames, sends nothing but destroys
+//  the message anyhow. Nullifies the caller's reference to the message (as
+//  it is a destructor).
+
+int
+zmsg_sendm (zmsg_t **self_p, void *dest)
+{
+    assert (self_p);
+    assert (dest);
+    zmsg_t *self = *self_p;
+
+    int rc = 0;
+    void *handle = zsock_resolve (dest);
+    if (self) {
+        assert (zmsg_is (self));
+        zframe_t *frame = (zframe_t *) zlist_pop (self->frames);
+        while (frame) {
+            rc = zframe_send (&frame, handle,ZFRAME_MORE);
+            if (rc != 0)
+                break;
+            frame = (zframe_t *) zlist_pop (self->frames);
+        }
+        if (rc == 0)
+            zmsg_destroy (self_p);
+    }
+    return rc;
+}
 
 //  --------------------------------------------------------------------------
 //  Return size of message, i.e. number of frames (0 or more).
@@ -631,14 +663,14 @@ zmsg_encode (zmsg_t *self, byte **buffer)
 //  there was insufficient memory to work.
 
 zmsg_t *
-zmsg_decode (byte *buffer, size_t buffer_size)
+zmsg_decode (const byte *buffer, size_t buffer_size)
 {
     zmsg_t *self = zmsg_new ();
     if (!self)
         return NULL;
 
-    byte *source = buffer;
-    byte *limit = buffer + buffer_size;
+    const byte *source = buffer;
+    const byte *limit = buffer + buffer_size;
     while (source < limit) {
         size_t frame_size = *source++;
         if (frame_size == 255) {

@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zbeacon - LAN discovery and presence
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -28,9 +28,8 @@
 #include "platform.h"
 #include "../include/czmq.h"
 
-#if (defined (__WINDOWS__))
-#define in_addr_t uint32_t
-#endif
+//  Constants
+#define INTERVAL_DFLT  1000         //  Default interval = 1 second
 
 //  --------------------------------------------------------------------------
 //  The self_t structure holds the state for one actor instance
@@ -113,8 +112,8 @@ s_self_prepare_udp (self_t *self)
                 send_to = inet_addr (ziflist_broadcast (iflist));
                 bind_to = inet_addr (ziflist_address (iflist));
                 if (self->verbose)
-                    zsys_info ("zbeacon: using address=%s broadcast=%s",
-                               ziflist_address (iflist), ziflist_broadcast (iflist));
+                    zsys_info ("zbeacon: interface=%s address=%s broadcast=%s",
+                               name, ziflist_address (iflist), ziflist_broadcast (iflist));
                 break;      //  iface is known, so allow it
             }
             name = ziflist_next (iflist);
@@ -194,6 +193,8 @@ s_self_handle_pipe (self_t *self)
         zframe_destroy (&self->transmit);
         zsock_recv (self->pipe, "fi", &self->transmit, &self->interval);
         assert (zframe_size (self->transmit) <= UDP_FRAME_MAX);
+        if (self->interval == 0)
+            self->interval = INTERVAL_DFLT;
         //  Start broadcasting immediately
         self->ping_at = zclock_mono ();
     }

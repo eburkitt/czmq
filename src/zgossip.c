@@ -23,8 +23,9 @@
 
     * BIND endpoint -- binds the gossip service to specified endpoint
     * PORT -- returns the last TCP port, if any, used for binding
-    * CONFIGURE configfile -- load configuration from specified file
+    * LOAD configfile -- load configuration from specified file
     * SET configpath value -- set configuration path = value
+    * SAVE configfile -- save configuration to specified file
     * CONNECT endpoint -- connect the gossip service to the specified peer
     * PUBLISH key value -- publish a key/value pair to the gossip cluster
     * STATUS -- return number of key/value pairs held by gossip service
@@ -171,7 +172,7 @@ server_initialize (server_t *self)
     
     self->remotes = zlistx_new ();
     assert (self->remotes);
-    zlistx_set_destructor (self->remotes, (czmq_destructor *) zsock_destroy_);
+    zlistx_set_destructor (self->remotes, (czmq_destructor *) zsock_destroy);
     
     self->tuples = zhashx_new ();
     assert (self->tuples);

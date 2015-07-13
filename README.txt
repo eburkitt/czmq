@@ -123,6 +123,7 @@ This is a list of known higher-level wrappers around CZMQ:
 * https://github.com/fmp88/ocaml-czmq - Ocaml
 * https://github.com/gar1t/erlang-czmq - Erlang
 * https://github.com/mtortonesi/ruby-czmq-ffi - Ruby FFI
+* https://github.com/zeromq/goczmq - Go
 
 ### API v3 Summary
 
@@ -143,15 +144,16 @@ This is the API provided by CZMQ v3.x, in alphabetical order.
 .pull doc/zframe.doc
 .pull doc/zgossip.doc
 .pull doc/zhash.doc
+.pull doc/zhashx.doc
 .pull doc/ziflist.doc
 .pull doc/zlist.doc
+.pull doc/zlistx.doc
 .pull doc/zloop.doc
 .pull doc/zmonitor.doc
 .pull doc/zmsg.doc
 .pull doc/zpoller.doc
 .pull doc/zproxy.doc
 .pull doc/zrex.doc
-.pull doc/zring.doc
 .pull doc/zsock.doc
 .pull doc/zsock_option.doc
 .pull doc/zstr.doc
@@ -193,7 +195,7 @@ The v2 API had a zthread class that let you create "attached threads" connected 
 
 To write an actor, use this template. Note that your actor is a single function "void myname (zsock_t *pipe, void *args)" function:
 
-/*  =========================================================================
+    /*  =========================================================================
         someclass - some description
 
         Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -298,7 +300,7 @@ To write an actor, use this template. Note that your actor is a single function 
         zsock_signal (pipe, 0);
 
         while (!self->terminated) {
-            zsock_t *which = zpoller_wait (self->poller, -1);
+            zsock_t *which = (zsock_t *) zpoller_wait (self->poller, -1);
             if (which == self->pipe)
                 s_self_handle_pipe (self);
             else
@@ -411,7 +413,6 @@ Don't include system headers in source files. The right place for these is czmq_
 Do read your code after you write it and ask, "Can I make this simpler?" We do use a nice minimalist and yet readable style. Learn it, adopt it, use it.
 
 Before opening a pull request read our [contribution guidelines](https://github.com/zeromq/czmq/blob/master/CONTRIBUTING.md). Thanks!
-
 
 ### Code Generation
 

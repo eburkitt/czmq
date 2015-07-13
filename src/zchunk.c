@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zchunk - work with memory chunks
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -32,6 +32,7 @@ struct _zchunk_t {
     size_t size;                //  Current size of data part
     size_t max_size;            //  Maximum allocated size
     size_t consumed;            //  Amount already consumed
+    zdigest_t *digest;          //  Chunk digest, if known
     byte *data;                 //  Data part follows here
 };
 
@@ -44,6 +45,7 @@ struct _zchunk_t {
 zchunk_t *
 zchunk_new (const void *data, size_t size)
 {
+    //  Use malloc, not zmalloc, to avoid nullification costs
     zchunk_t *self = (zchunk_t *) malloc (sizeof (zchunk_t) + size);
     if (self) {
         self->tag = ZCHUNK_TAG;
@@ -51,9 +53,10 @@ zchunk_new (const void *data, size_t size)
         self->max_size = size;
         self->consumed = 0;
         self->data = (byte *) self + sizeof (zchunk_t);
+        self->digest = NULL;
         if (data) {
             self->size = size;
-            memcpy (self->data, data, size);
+            memcpy (self->data, data, self->size);
         }
     }
     return self;
@@ -74,6 +77,7 @@ zchunk_destroy (zchunk_t **self_p)
         if (self->data != (byte *) self + sizeof (zchunk_t))
             free (self->data);
         self->tag = 0xDeadBeef;
+        zdigest_destroy (&self->digest);
         free (self);
         *self_p = NULL;
     }
@@ -88,14 +92,19 @@ zchunk_resize (zchunk_t *self, size_t size)
 {
     assert (self);
     assert (zchunk_is (self));
+    zdigest_destroy (&self->digest);
 
-    //  If data was reallocated independently, free it independently
-    if (self->data != (byte *) self + sizeof (zchunk_t))
-        free (self->data);
-
-    self->data = (byte *) zmalloc (size);
+    //  Set new sizes
     self->max_size = size;
-    self->size = 0;
+    self->size = 0;             //  TODO: this is a bit annoying, is it needed?
+
+    //  We can't realloc the chunk itself, as the caller's reference
+    //  won't change. So we modify self->data only, depending on whether
+    //  it was already reallocated, or not.
+    if (self->data == (byte *) self + sizeof (zchunk_t))
+        self->data = (byte *) malloc (self->max_size);
+    else
+        self->data = (byte *) realloc (self->data, self->max_size);
 }
 
 
@@ -144,12 +153,12 @@ zchunk_set (zchunk_t *self, const void *data, size_t size)
 {
     assert (self);
     assert (zchunk_is (self));
+    zdigest_destroy (&self->digest);
 
     if (size > self->max_size)
         size = self->max_size;
     if (data)
         memcpy (self->data, data, size);
-
     self->size = size;
     return size;
 }
@@ -164,6 +173,7 @@ zchunk_fill (zchunk_t *self, byte filler, size_t size)
 {
     assert (self);
     assert (zchunk_is (self));
+    zdigest_destroy (&self->digest);
 
     if (size > self->max_size)
         size = self->max_size;
@@ -175,17 +185,49 @@ zchunk_fill (zchunk_t *self, byte filler, size_t size)
 
 
 //  --------------------------------------------------------------------------
-//  Append user-supplied data to chunk, return resulting chunk size
+//  Append user-supplied data to chunk, return resulting chunk size. If the
+//  data would exceeed the available space, it is truncated. If you want to
+//  grow the chunk to accomodate new data, use the zchunk_extend method.
 
 size_t
 zchunk_append (zchunk_t *self, const void *data, size_t size)
 {
     assert (self);
     assert (zchunk_is (self));
+    zdigest_destroy (&self->digest);
 
     if (self->size + size > self->max_size)
         size = self->max_size - self->size;
 
+    memcpy (self->data + self->size, data, size);
+    self->size += size;
+    return self->size;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Append user-supplied data to chunk, return resulting chunk size. If the
+//  data would exceeed the available space, the chunk grows in size.
+
+size_t
+zchunk_extend (zchunk_t *self, const void *data, size_t size)
+{
+    assert (self);
+    if (self->size + size > self->max_size) {
+        self->max_size = (self->size + size) * 2;
+
+        //  We can't realloc the chunk itself, as the caller's reference
+        //  won't change. So we modify self->data only, depending on whether
+        //  it was already reallocated, or not.
+        if (self->data == (byte *) self + sizeof (zchunk_t)) {
+            byte *old_data = self->data;
+            self->data = (byte *) malloc (self->max_size);
+            memcpy (self->data, old_data, self->size);
+        }
+        else
+            self->data = (byte *) realloc (self->data, self->max_size);
+    }
+    assert (self->size + size <= self->max_size);
     memcpy (self->data + self->size, data, size);
     self->size += size;
     return self->size;
@@ -260,7 +302,7 @@ zchunk_write (zchunk_t *self, FILE *handle)
     assert (zchunk_is (self));
 
     size_t items = fwrite (self->data, 1, self->size, handle);
-    int rc = (items < self->size) ? -1 : 0;
+    int rc = (items < self->size)? -1: 0;
     return rc;
 }
 
@@ -380,9 +422,9 @@ zchunk_pack (zchunk_t *self)
 {
     assert (self);
     assert (zchunk_is (self));
-
     return zframe_new (self->data, self->max_size);
 }
+
 
 //  --------------------------------------------------------------------------
 //  Create a zchunk from a zframe.
@@ -392,8 +434,26 @@ zchunk_unpack (zframe_t *frame)
 {
     assert (frame);
     assert (zframe_is (frame));
-
     return zchunk_new (zframe_data (frame), zframe_size (frame));
+}
+
+
+//  --------------------------------------------------------------------------
+//  Calculate SHA1 digest for chunk, using zdigest class. Caller should not
+//  modify digest.
+
+const char *
+zchunk_digest (zchunk_t *self)
+{
+    assert (self);
+    if (!self->digest)
+        self->digest = zdigest_new ();
+    if (self->digest) {
+        zdigest_update (self->digest, self->data, self->size);
+        return zdigest_string (self->digest);
+    }
+    else
+        return NULL;
 }
 
 
@@ -488,6 +548,7 @@ zchunk_test (bool verbose)
     assert (memcmp (zchunk_data (chunk), "1234567890", 10) == 0);
     assert (zchunk_size (chunk) == 10);
     assert (zchunk_streq (chunk, "1234567890"));
+    assert (streq (zchunk_digest (chunk), "01B307ACBA4F54F55AAFC33BB06BBBF6CA803E9A"));
     char *string = zchunk_strdup (chunk);
     assert (streq (string, "1234567890"));
     free (string);
@@ -509,6 +570,14 @@ zchunk_test (bool verbose)
     assert (memcmp (zchunk_data (copy), "1234567890", 10) == 0);
     assert (zchunk_size (copy) == 10);
     zchunk_destroy (&copy);
+    zchunk_destroy (&chunk);
+
+    chunk = zchunk_new (NULL, 0);
+    zchunk_extend (chunk, "12345678", 8);
+    zchunk_extend (chunk, "90ABCDEF", 8);
+    zchunk_extend (chunk, "GHIJKLMN", 8);
+    assert (zchunk_size (chunk) == 24);
+    assert (zchunk_streq (chunk, "1234567890ABCDEFGHIJKLMN"));
     zchunk_destroy (&chunk);
 
     copy = zchunk_new ("1234567890abcdefghij", 20);
