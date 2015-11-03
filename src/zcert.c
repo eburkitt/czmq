@@ -222,12 +222,12 @@ zcert_load (const char *filename)
 
     zcert_t *self = NULL;
     if (root) {
-        char *public_text = zconfig_resolve (root, "/curve/public-key", NULL);
+        char *public_text = zconfig_get (root, "/curve/public-key", NULL);
         if (public_text && strlen (public_text) == 40) {
             byte public_key [32] = { 0 };
             byte secret_key [32] = { 0 };
 #if (ZMQ_VERSION_MAJOR == 4)
-            char *secret_text = zconfig_resolve (root, "/curve/secret-key", NULL);
+            char *secret_text = zconfig_get (root, "/curve/secret-key", NULL);
             zmq_z85_decode (public_key, public_text);
             if (secret_text && strlen (secret_text) == 40)
                 zmq_z85_decode (secret_key, secret_text);
@@ -235,7 +235,7 @@ zcert_load (const char *filename)
             //  Load metadata into certificate
             self = zcert_new_from (public_key, secret_key);
             zconfig_t *metadata = zconfig_locate (root, "/metadata");
-            zconfig_t *item = metadata ? zconfig_child (metadata) : NULL;
+            zconfig_t *item = metadata? zconfig_child (metadata): NULL;
             while (item) {
                 zcert_set_meta (self, zconfig_name (item), zconfig_value (item));
                 item = zconfig_next (item);

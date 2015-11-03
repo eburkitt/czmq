@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zlistx - extended generic list container
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -43,7 +43,6 @@ typedef struct _node_t {
 
 struct _zlistx_t {
     node_t *head;                   //  First item in list, if any
-    node_t *tail;                   //  Last item in list, if any
     node_t *cursor;                 //  Current cursors for iteration
     size_t size;                    //  Number of items in list
     czmq_duplicator *duplicator;    //  Item duplicator, if any
@@ -212,6 +211,31 @@ zlistx_size (zlistx_t *self)
 
 //  --------------------------------------------------------------------------
 //  Return the item at the head of list. If the list is empty, returns NULL.
+//  Leaves cursor as-is.
+
+void *
+zlistx_head (zlistx_t *self)
+{
+    assert (self);
+    return self->head? self->head->item: NULL;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return the item at the tail of list. If the list is empty, returns NULL.
+
+//  Leaves cursor as-is.
+
+void *
+zlistx_tail (zlistx_t *self)
+{
+    assert (self);
+    return self->head? self->head->prev->item: NULL;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return the item at the head of list. If the list is empty, returns NULL.
 //  Leaves cursor pointing at the head item, or NULL if the list is empty.
 
 void *
@@ -364,6 +388,19 @@ zlistx_detach (zlistx_t *self, void *handle)
 
 
 //  --------------------------------------------------------------------------
+//  Detach item at the cursor, if any, from the list. The item is not modified,
+//  and the caller is responsible for destroying it as necessary. Returns item
+//  that was detached, or null if none was. Moves cursor to previous item, so
+//  you can detach items while iterating forwards through a list.
+
+void *
+zlistx_detach_cur (zlistx_t *self)
+{
+    return zlistx_detach (self, zlistx_cursor (self));
+}
+
+
+//  --------------------------------------------------------------------------
 //  Delete an item, using its handle. Calls the item destructor is any is
 //  set. If handle is null, deletes the first item on the list. Returns 0
 //  if an item was deleted, -1 if not. If cursor was at item, moves cursor
@@ -449,13 +486,13 @@ zlistx_sort (zlistx_t *self)
     //  Uses a comb sort, which is simple and reasonably fast
     //  See http://en.wikipedia.org/wiki/Comb_sort
     assert (self);
-    int gap = self->size;
+    size_t gap = self->size;
     bool swapped = false;
     while (gap > 1 || swapped) {
-        gap = (int) ((double) gap / 1.3);
+        gap = (size_t) ((double) gap / 1.3);
         node_t *base = self->head->next;
         node_t *test = self->head->next;
-        int jump = gap;
+        size_t jump = gap;
         while (jump--)
             test = test->next;
 
@@ -617,7 +654,7 @@ zlistx_set_comparator (zlistx_t *self, czmq_comparator comparator)
 //  Runs selftest of class
 
 void
-zlistx_test (int verbose)
+zlistx_test (bool verbose)
 {
     printf (" * zlistx: ");
 

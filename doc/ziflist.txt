@@ -10,11 +10,15 @@ SYNOPSIS
 ----
 //  Get a list of network interfaces currently defined on the system
 CZMQ_EXPORT ziflist_t *
-    ziflist_new (void);
+    ziflist_new ();
 
 //  Destroy a ziflist instance
 CZMQ_EXPORT void
     ziflist_destroy (ziflist_t **self_p);
+
+//  Print properties of the ziflist object.
+CZMQ_EXPORT void
+    ziflist_print (ziflist_t *self);
 
 //  Reload network interfaces from system
 CZMQ_EXPORT void
@@ -44,7 +48,7 @@ CZMQ_EXPORT const char *
 CZMQ_EXPORT const char *
     ziflist_netmask (ziflist_t *self);
 
-//  Selftest for this class
+//  Self test of this class.
 CZMQ_EXPORT void
     ziflist_test (bool verbose);
 ----
@@ -58,6 +62,7 @@ mobile devices). The caller can then access the network interface
 information using an iterator that works like zlistx. Only stores those
 interfaces with broadcast capability, and ignores the loopback interface.
 
+Please add @discuss section in ../src/ziflist.c.
 
 EXAMPLE
 -------
@@ -65,6 +70,7 @@ EXAMPLE
 ----
 ziflist_t *iflist = ziflist_new ();
 assert (iflist);
+
 size_t items = ziflist_size (iflist);
 
 if (verbose) {
@@ -80,7 +86,3 @@ ziflist_reload (iflist);
 assert (items == ziflist_size (iflist));
 ziflist_destroy (&iflist);
 ----
-
-SEE ALSO
---------
-linkczmq:czmq[7]

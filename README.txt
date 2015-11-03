@@ -4,6 +4,7 @@
 # CZMQ - High-level C binding for 0MQ
 
 [![Build Status](https://travis-ci.org/zeromq/czmq.png?branch=master)](https://travis-ci.org/zeromq/czmq)
+[![Build status](https://ci.appveyor.com/api/projects/status/q7y22juu3pnl5wq6?svg=true)](https://ci.appveyor.com/project/zeromq/czmq)
 
 ## Contents
 
@@ -144,19 +145,21 @@ This is the API provided by CZMQ v3.x, in alphabetical order.
 .pull doc/zframe.doc
 .pull doc/zgossip.doc
 .pull doc/zhash.doc
+.pull doc/zhashx.doc
 .pull doc/ziflist.doc
 .pull doc/zlist.doc
+.pull doc/zlistx.doc
 .pull doc/zloop.doc
 .pull doc/zmonitor.doc
 .pull doc/zmsg.doc
 .pull doc/zpoller.doc
 .pull doc/zproxy.doc
 .pull doc/zrex.doc
-.pull doc/zring.doc
 .pull doc/zsock.doc
 .pull doc/zsock_option.doc
 .pull doc/zstr.doc
 .pull doc/zsys.doc
+.pull doc/ztrie.doc
 .pull doc/zuuid.doc
 
 ### API v2 Summary
@@ -299,7 +302,7 @@ To write an actor, use this template. Note that your actor is a single function 
         zsock_signal (pipe, 0);
 
         while (!self->terminated) {
-            zsock_t *which = zpoller_wait (self->poller, -1);
+            zsock_t *which = (zsock_t *) zpoller_wait (self->poller, -1);
             if (which == self->pipe)
                 s_self_handle_pipe (self);
             else

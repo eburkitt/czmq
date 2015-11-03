@@ -10,18 +10,21 @@
      * The XML model used for this code generation: zgossip.xml, or
      * The code generation script that built this file: zproto_server_c
     ************************************************************************
-    Copyright (c) the Contributors as noted in the AUTHORS file.       
-    This file is part of CZMQ, the high-level C binding for 0MQ:       
-    http://czmq.zeromq.org.                                            
-                                                                       
-    This Source Code Form is subject to the terms of the Mozilla Public
-    License, v. 2.0. If a copy of the MPL was not distributed with this
-    file, You can obtain one at http://mozilla.org/MPL/2.0/.           
+    Copyright (c) 1991-2012 iMatix Corporation -- http://www.imatix.com                
+    Copyright other contributors as noted in the AUTHORS file.                         
+                                                                                       
+    This file is part of CZMQ, the high-level C binding for 0MQ: http://czmq.zeromq.org
+                                                                                       
+    This Source Code Form is subject to the terms of the Mozilla Public                
+    License, v. 2.0. If a copy of the MPL was not distributed with this                
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.                           
     =========================================================================
 */
 
-#ifndef __ZGOSSIP_H_INCLUDED__
-#define __ZGOSSIP_H_INCLUDED__
+#ifndef ZGOSSIP_H_INCLUDED
+#define ZGOSSIP_H_INCLUDED
+
+#include "czmq.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -33,11 +36,11 @@ extern "C" {
 //  Create new zgossip instance, passing logging prefix:
 //
 //      zactor_t *zgossip = zactor_new (zgossip, "myname");
-//  
+//
 //  Destroy zgossip instance
 //
 //      zactor_destroy (&zgossip);
-//  
+//
 //  Enable verbose logging of commands and activity:
 //
 //      zstr_send (zgossip, "VERBOSE");
@@ -58,12 +61,16 @@ extern "C" {
 //  Specify configuration file to load, overwriting any previous loaded
 //  configuration file or options:
 //
-//      zstr_sendx (zgossip, "CONFIGURE", filename, NULL);
+//      zstr_sendx (zgossip, "LOAD", filename, NULL);
 //
 //  Set configuration path value:
 //
 //      zstr_sendx (zgossip, "SET", path, value, NULL);
-//    
+//
+//  Save configuration data to config file on disk:
+//
+//      zstr_sendx (zgossip, "SAVE", filename, NULL);
+//
 //  Send zmsg_t instance to zgossip:
 //
 //      zactor_send (zgossip, &msg);

@@ -1,6 +1,6 @@
 /*  =========================================================================
     zgossip_msg - ZeroMQ Gossip Protocol
-    
+
     Codec header for zgossip_msg.
 
     ** WARNING *************************************************************
@@ -12,18 +12,19 @@
      * The XML model used for this code generation: zgossip_msg.xml, or
      * The code generation script that built this file: zproto_codec_c
     ************************************************************************
-    Copyright (c) the Contributors as noted in the AUTHORS file.       
-    This file is part of CZMQ, the high-level C binding for 0MQ:       
-    http://czmq.zeromq.org.                                            
-                                                                       
-    This Source Code Form is subject to the terms of the Mozilla Public
-    License, v. 2.0. If a copy of the MPL was not distributed with this
-    file, You can obtain one at http://mozilla.org/MPL/2.0/.           
+    Copyright (c) 1991-2012 iMatix Corporation -- http://www.imatix.com                
+    Copyright other contributors as noted in the AUTHORS file.                         
+                                                                                       
+    This file is part of CZMQ, the high-level C binding for 0MQ: http://czmq.zeromq.org
+                                                                                       
+    This Source Code Form is subject to the terms of the Mozilla Public                
+    License, v. 2.0. If a copy of the MPL was not distributed with this                
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.                           
     =========================================================================
 */
 
-#ifndef __ZGOSSIP_MSG_H_INCLUDED__
-#define __ZGOSSIP_MSG_H_INCLUDED__
+#ifndef ZGOSSIP_MSG_H_INCLUDED
+#define ZGOSSIP_MSG_H_INCLUDED
 
 /*  These are the zgossip_msg messages:
 
@@ -84,7 +85,7 @@ CZMQ_EXPORT int
 //  Send the zgossip_msg to the output socket, does not destroy it
 CZMQ_EXPORT int
     zgossip_msg_send (zgossip_msg_t *self, zsock_t *output);
-    
+
 //  Print contents of message to stdout
 CZMQ_EXPORT void
     zgossip_msg_print (zgossip_msg_t *self);
@@ -122,7 +123,7 @@ CZMQ_EXPORT void
     zgossip_msg_set_ttl (zgossip_msg_t *self, uint32_t ttl);
 
 //  Self test of this class
-CZMQ_EXPORT int
+CZMQ_EXPORT void
     zgossip_msg_test (bool verbose);
 //  @end
 

@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zactor - simple actor framework
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -23,7 +23,7 @@
 
     A zactor_t instance acts like a zsock_t and you can pass it to any CZMQ
     method that would take a zsock_t argument, including methods in zframe,
-    zmsg, zstr, zpoller, and zloop.
+    zmsg, zstr, and zpoller. (zloop somehow escaped and needs catching.)
 
     An actor function MUST call zsock_signal (pipe) when initialized
     and MUST listen to pipe and exit on $TERM command.
@@ -111,6 +111,7 @@ zactor_new (zactor_fn *actor, void *args)
     }
     shim->pipe = zsys_create_pipe (&self->pipe);
     if (!shim->pipe) {
+        free (shim);
         zactor_destroy (&self);
         return NULL;
     }
@@ -164,10 +165,12 @@ zactor_destroy (zactor_t **self_p)
         //  If the pipe isn't connected any longer, assume child thread
         //  has already quit due to other reasons and don't collect the
         //  exit signal.
-        zsock_set_sndtimeo (self->pipe, 0);
-        if (zstr_send (self->pipe, "$TERM") == 0)
-            zsock_wait (self->pipe);
-        zsock_destroy (&self->pipe);
+        if (self->pipe) {
+            zsock_set_sndtimeo (self->pipe, 0);
+            if (zstr_send (self->pipe, "$TERM") == 0)
+                zsock_wait (self->pipe);
+            zsock_destroy (&self->pipe);
+        }
         self->tag = 0xDeadBeef;
         free (self);
         *self_p = NULL;

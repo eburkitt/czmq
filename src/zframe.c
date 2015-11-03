@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zframe - working with single message frames
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -36,6 +36,7 @@ struct _zframe_t {
     uint32_t tag;               //  Object tag for runtime detection
     zmq_msg_t zmsg;             //  zmq_msg_t blob for frame
     int more;                   //  More flag, from last read
+    uint32_t routing_id;        //  Routing ID back to sender, if any
 };
 
 //  --------------------------------------------------------------------------
@@ -61,7 +62,8 @@ zframe_new (const void *data, size_t size)
 
 
 //  --------------------------------------------------------------------------
-//  Constructor; Allocates a new empty (zero-sized) frame
+//  Create an empty (zero-sized) frame. The caller is responsible for
+//  destroying the return value when finished with it.
 
 zframe_t *
 zframe_new_empty (void)
@@ -94,6 +96,17 @@ zframe_destroy (zframe_t **self_p)
 
 
 //  --------------------------------------------------------------------------
+//  Create a frame with a specified string content.
+//  The caller is responsible for destroying the return value when finished with it.
+
+zframe_t *
+zframe_from (const char *string)
+{
+    return zframe_new (string, strlen (string));
+}
+
+
+//  --------------------------------------------------------------------------
 //  Receive frame from socket, returns zframe_t object or NULL if the recv
 //  was interrupted. Does a blocking recv, if you want to not block then use
 //  zpoller or zloop.
@@ -109,7 +122,12 @@ zframe_recv (void *source)
             zframe_destroy (&self);
             return NULL;            //  Interrupted or terminated
         }
-        self->more = zsock_rcvmore (handle);
+        self->more = zsock_rcvmore (source);
+#if defined (ZMQ_SERVER)
+        //  Grab routing ID if we're reading from a SERVER socket (ZMQ 4.2 and later)
+        if (zsock_type (source) == ZMQ_SERVER)
+            self->routing_id = zmq_msg_routing_id (&self->zmsg);
+#endif
     }
     return self;
 }
@@ -137,12 +155,18 @@ zframe_send (zframe_t **self_p, void *dest, int flags)
             zmq_msg_init (&copy);
             if (zmq_msg_copy (&copy, &self->zmsg))
                 return -1;
+#if defined (ZMQ_SERVER)
+            zmq_msg_set_routing_id (&copy, self->routing_id);
+#endif
             if (zmq_sendmsg (handle, &copy, send_flags) == -1) {
                 zmq_msg_close (&copy);
                 return -1;
             }
         }
         else {
+#if defined (ZMQ_SERVER)
+            zmq_msg_set_routing_id (&self->zmsg, self->routing_id);
+#endif
             if (zmq_sendmsg (handle, &self->zmsg, send_flags) >= 0)
                 zframe_destroy (self_p);
             else
@@ -151,6 +175,7 @@ zframe_send (zframe_t **self_p, void *dest, int flags)
     }
     return 0;
 }
+
 
 //  --------------------------------------------------------------------------
 //  Return size of frame.
@@ -209,7 +234,7 @@ zframe_strhex (zframe_t *self)
 
     size_t size = zframe_size (self);
     byte *data = zframe_data (self);
-    char *hex_str = (char *) zmalloc (size * 2 + 1);
+    char *hex_str = (char *) malloc (size * 2 + 1);
     if (!hex_str)
         return NULL;
 
@@ -253,7 +278,7 @@ zframe_streq (zframe_t *self, const char *string)
     assert (zframe_is (self));
 
     if (zframe_size (self) == strlen (string)
-    && memcmp (zframe_data (self), string, strlen (string)) == 0) 
+    && memcmp (zframe_data (self), string, strlen (string)) == 0)
         return true;
     else
         return false;
@@ -286,6 +311,32 @@ zframe_set_more (zframe_t *self, int more)
     assert (more == 0 || more == 1);
 
     self->more = more;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return frame routing ID, if the frame came from a ZMQ_SERVER socket.
+//  Else returns zero.
+
+uint32_t
+zframe_routing_id (zframe_t *self)
+{
+    assert (self);
+    assert (zframe_is (self));
+    return self->routing_id;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set routing ID on frame. This is used if/when the frame is sent to a
+//  ZMQ_SERVER socket.
+
+void
+zframe_set_routing_id (zframe_t *self, uint32_t routing_id)
+{
+    assert (self);
+    assert (zframe_is (self));
+    self->routing_id = routing_id;
 }
 
 
@@ -395,7 +446,7 @@ zframe_recv_nowait (void *source)
             zframe_destroy (&self);
             return NULL;            //  Interrupted or terminated
         }
-        self->more = zsock_rcvmore (handle);
+        self->more = zsock_rcvmore (source);
     }
     return self;
 }
@@ -517,6 +568,42 @@ zframe_test (bool verbose)
 
     zsock_destroy (&input);
     zsock_destroy (&output);
+
+#if defined (ZMQ_SERVER)
+    //  Create server and client sockets and connect over inproc
+    zsock_t *server = zsock_new_server ("inproc://zframe-server.test");
+    assert (server);
+    zsock_t *client = zsock_new_client ("inproc://zframe-server.test");
+    assert (client);
+
+    //  Send request from client to server
+    zframe_t *request = zframe_new ("Hello", 5);
+    assert (request);
+    rc = zframe_send (&request, client, 0);
+    assert (rc == 0);
+    assert (!request);
+
+    //  Read request and send reply
+    request = zframe_recv (server);
+    assert (request);
+    assert (zframe_streq (request, "Hello"));
+    assert (zframe_routing_id (request));
+
+    zframe_t *reply = zframe_new ("World", 5);
+    assert (reply);
+    zframe_set_routing_id (reply, zframe_routing_id (request));
+    rc = zframe_send (&reply, server, 0);
+    assert (rc == 0);
+
+    //  Read reply
+    reply = zframe_recv (client);
+    assert (zframe_streq (reply, "World"));
+    assert (zframe_routing_id (reply) == 0);
+    zframe_destroy (&reply);
+
+    zsock_destroy (&client);
+    zsock_destroy (&server);
+#endif
 
     //  @end
     printf ("OK\n");

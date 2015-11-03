@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zhash - simple generic hash container
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -36,7 +36,7 @@
 typedef struct _item_t {
     void *value;                //  Opaque item value
     struct _item_t *next;       //  Next item in the hash slot
-    qbyte index;                //  Index of item in table
+    size_t index;               //  Index of item in table
     char *key;                  //  Item's original key
     zhash_free_fn *free_fn;     //  Value free function if any
 } item_t;
@@ -186,9 +186,6 @@ zhash_insert (zhash_t *self, const char *key, void *value)
         self->items = new_items;
         self->limit = new_limit;
     }
-    //  If necessary, take duplicate of item (string) value
-    if (self->autofree)
-        value = strdup ((char *) value);
 
     return s_item_insert (self, key, value)? 0: -1;
 }
@@ -225,6 +222,9 @@ s_item_insert (zhash_t *self, const char *key, void *value)
         item = (item_t *) zmalloc (sizeof (item_t));
         if (!item)
             return NULL;
+        //  If necessary, take duplicate of item (string) value
+        if (self->autofree)
+            value = strdup ((char *) value);
         item->value = value;
         item->key = strdup (key);
         item->index = self->cached_index;
@@ -703,7 +703,8 @@ zhash_pack (zhash_t *self)
             needle += strlen ((char *) item->key);
 
             //  Store value as longstr
-            *(uint32_t *) needle = htonl (strlen ((char *) item->value));
+            size_t length = strlen ((char *) item->value);
+            *(uint32_t *) needle = htonl ((u_long) length);
             needle += 4;
             memcpy (needle, (char *) item->value, strlen ((char *) item->value));
             needle += strlen ((char *) item->value);
@@ -812,7 +813,7 @@ zhash_foreach (zhash_t *self, zhash_foreach_fn *callback, void *argument)
 //
 
 void
-zhash_test (int verbose)
+zhash_test (bool verbose)
 {
     printf (" * zhash: ");
 
@@ -966,6 +967,9 @@ zhash_test (int verbose)
     strcpy (value, "This is a string");
     rc = zhash_insert (hash, "key1", value);
     assert (rc == 0);
+    strcpy (value, "Inserting with the same key will fail");
+    rc = zhash_insert (hash, "key1", value);
+    assert (rc == -1);
     strcpy (value, "Ring a ding ding");
     rc = zhash_insert (hash, "key2", value);
     assert (rc == 0);

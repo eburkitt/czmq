@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     czmq_prelude.h - CZMQ environment
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -299,10 +299,15 @@
      || (defined (_POSIX_VERSION)  && (_POSIX_VERSION  >= 199309L)))
 #       include <sched.h>
 #   endif
-#   if (defined (__UTYPE_OSX))
-#       include <crt_externs.h>         //  For _NSGetEnviron()
+#   if (defined (__UTYPE_OSX) || defined (__UTYPE_IOS))
 #       include <mach/clock.h>
 #       include <mach/mach.h>           //  For monotonic clocks
+#   endif
+#   if (defined (__UTYPE_OSX))
+#       include <crt_externs.h>         //  For _NSGetEnviron()
+#   endif
+#   if (defined (__UTYPE_ANDROID))
+#       include <android/log.h>
 #   endif
 #endif
 
@@ -446,11 +451,12 @@ typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
     typedef __int16 int16_t;
     typedef __int32 int32_t;
     typedef __int64 int64_t;
-    typedef unsigned __int8 uint8_t;    
+    typedef unsigned __int8 uint8_t;
     typedef unsigned __int16 uint16_t;
     typedef unsigned __int32 uint32_t;
     typedef unsigned __int64 uint64_t;
-#   endif    
+#   endif
+    typedef uint32_t in_addr_t;
 #   if (!defined (PRId8))
 #       define PRId8    "d"
 #   endif
@@ -484,7 +490,7 @@ typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
     typedef unsigned int uint;
     //  This fixes header-order dependence problem with some Linux versions
 #elif (defined (__UTYPE_LINUX))
-#   if (__STDC_VERSION__ >= 199901L)
+#   if (__STDC_VERSION__ >= 199901L && !defined (__USE_MISC))
     typedef unsigned int uint;
 #   endif
 #endif
@@ -511,8 +517,11 @@ typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
 #endif
 
 //- Memory allocations ------------------------------------------------------
-
-CZMQ_EXPORT extern volatile uint64_t zsys_allocs;
+#if defined(__cplusplus)
+   extern "C" CZMQ_EXPORT volatile uint64_t zsys_allocs;
+#else
+   extern CZMQ_EXPORT volatile uint64_t zsys_allocs;
+#endif
 
 //  Replacement for malloc() which asserts if we run out of heap, and
 //  which zeroes the allocated block.
@@ -520,7 +529,7 @@ static inline void *
 safe_malloc (size_t size, const char *file, unsigned line)
 {
 //     printf ("%s:%u %08d\n", file, line, (int) size);
-#if defined (__UTYPE_LINUX)
+#if defined (__UTYPE_LINUX) && defined (__IS_64BIT__)
     //  On GCC we count zmalloc memory allocations
     __sync_add_and_fetch (&zsys_allocs, 1);
 #endif
@@ -574,13 +583,13 @@ typedef int SOCKET;
 #   endif
 #endif
 
-#if defined (__WINDOWS__) && !defined (HAVE_LIBUUID)
-#   define HAVE_LIBUUID 1
+#if defined (__WINDOWS__) && !defined (HAVE_UUID)
+#   define HAVE_UUID 1
 #endif
-#if defined (__UTYPE_OSX) && !defined (HAVE_LIBUUID)
-#   define HAVE_LIBUUID 1
+#if defined (__UTYPE_OSX) && !defined (HAVE_UUID)
+#   define HAVE_UUID 1
 #endif
-#if defined (HAVE_LIBUUID)
+#if defined (HAVE_UUID)
 #   if defined (__UTYPE_FREEBSD) || defined (__UTYPE_NETBSD)
 #       include <uuid.h>
 #   elif defined __UTYPE_HPUX

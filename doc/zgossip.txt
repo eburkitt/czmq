@@ -13,11 +13,11 @@ SYNOPSIS
 //  Create new zgossip instance, passing logging prefix:
 //
 //      zactor_t *zgossip = zactor_new (zgossip, "myname");
-//  
+//
 //  Destroy zgossip instance
 //
 //      zactor_destroy (&zgossip);
-//  
+//
 //  Enable verbose logging of commands and activity:
 //
 //      zstr_send (zgossip, "VERBOSE");
@@ -38,12 +38,16 @@ SYNOPSIS
 //  Specify configuration file to load, overwriting any previous loaded
 //  configuration file or options:
 //
-//      zstr_sendx (zgossip, "CONFIGURE", filename, NULL);
+//      zstr_sendx (zgossip, "LOAD", filename, NULL);
 //
 //  Set configuration path value:
 //
 //      zstr_sendx (zgossip, "SET", path, value, NULL);
-//    
+//
+//  Save configuration data to config file on disk:
+//
+//      zstr_sendx (zgossip, "SAVE", filename, NULL);
+//
 //  Send zmsg_t instance to zgossip:
 //
 //      zactor_send (zgossip, &msg);
@@ -200,7 +204,3 @@ zactor_destroy (&alpha);
 zactor_destroy (&beta);
 
 ----
-
-SEE ALSO
---------
-linkczmq:czmq[7]

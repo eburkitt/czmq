@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zmsg - working with multipart messages
 
     -------------------------------------------------------------------------
@@ -45,6 +45,7 @@ struct _zmsg_t {
     uint32_t tag;               //  Object tag for runtime detection
     zlist_t *frames;            //  List of frames
     size_t content_size;        //  Total content size
+    uint32_t routing_id;        //  Routing ID back to sender, if any
 };
 
 
@@ -91,6 +92,7 @@ zmsg_destroy (zmsg_t **self_p)
 //  zsock_t object. Returns a new zmsg_t object if successful, or NULL if the
 //  receive was interrupted. The recv call blocks: if you want a non-blocking
 //  call, use the zloop or zpoller class to receive only from ready sockets.
+//  Keeps retrying if interrupted in a middle of a multipart sequence.
 
 zmsg_t *
 zmsg_recv (void *source)
@@ -100,18 +102,26 @@ zmsg_recv (void *source)
     if (!self)
         return NULL;
 
-    void *handle = zsock_resolve (source);
     while (true) {
-        zframe_t *frame = zframe_recv (handle);
+        zframe_t *frame = zframe_recv (source);
         if (!frame) {
-            zmsg_destroy (&self);
-            break;              //  Interrupted or terminated
+            if (errno == EINTR && zlist_head (self->frames))
+                continue;
+            else {
+                zmsg_destroy (&self);
+                break;              //  Interrupted or terminated
+            }
         }
+#if defined (ZMQ_SERVER)
+        //  Grab routing ID if we're reading from a SERVER socket (ZMQ 4.2 and later)
+        if (zsock_type (source) == ZMQ_SERVER)
+            self->routing_id = zframe_routing_id (frame);
+#endif
         if (zmsg_append (self, &frame)) {
             zmsg_destroy (&self);
             break;
         }
-        if (!zsock_rcvmore (handle))
+        if (!zsock_rcvmore (source))
             break;              //  Last message frame
     }
     return self;
@@ -123,6 +133,7 @@ zmsg_recv (void *source)
 //  it successfully. If the message has no frames, sends nothing but destroys
 //  the message anyhow. Nullifies the caller's reference to the message (as
 //  it is a destructor).
+//  Keeps retrying if interrupted in a middle of a multipart sequence.
 
 int
 zmsg_send (zmsg_t **self_p, void *dest)
@@ -132,16 +143,22 @@ zmsg_send (zmsg_t **self_p, void *dest)
     zmsg_t *self = *self_p;
 
     int rc = 0;
-    void *handle = zsock_resolve (dest);
     if (self) {
         assert (zmsg_is (self));
-        zframe_t *frame = (zframe_t *) zlist_pop (self->frames);
-        while (frame) {
-            rc = zframe_send (&frame, handle,
-                              zlist_size (self->frames) ? ZFRAME_MORE : 0);
-            if (rc != 0)
-                break;
-            frame = (zframe_t *) zlist_pop (self->frames);
+        bool sent_some = false;
+        zframe_t *frame;
+        while ((frame = (zframe_t *) zlist_head (self->frames))) {
+            zframe_set_routing_id (frame, self->routing_id);
+            rc = zframe_send (&frame, dest,
+                              zlist_size (self->frames) > 1? ZFRAME_MORE: 0);
+            if (rc != 0) {
+                if (errno == EINTR && sent_some)
+                    continue;
+                else
+                    break;
+            }
+            sent_some = true;
+            (void) zlist_pop (self->frames);
         }
         if (rc == 0)
             zmsg_destroy (self_p);
@@ -149,6 +166,44 @@ zmsg_send (zmsg_t **self_p, void *dest)
     return rc;
 }
 
+//  --------------------------------------------------------------------------
+//  Send message to destination socket as part of a multipart sequence, and
+//  destroy the message after sending it successfully. Note that after a
+//  zmsg_sendm, you must call zmsg_send or another method that sends a final
+//  message part. If the message has no frames, sends nothing but destroys
+//  the message anyhow. Nullifies the caller's reference to the message (as
+//  it is a destructor).
+//  Keeps retrying if interrupted in a middle of a multipart sequence.
+
+int
+zmsg_sendm (zmsg_t **self_p, void *dest)
+{
+    assert (self_p);
+    assert (dest);
+    zmsg_t *self = *self_p;
+
+    int rc = 0;
+    if (self) {
+        assert (zmsg_is (self));
+        bool sent_some = false;
+        zframe_t *frame;
+        while ((frame = (zframe_t *) zlist_head (self->frames))) {
+            zframe_set_routing_id (frame, self->routing_id);
+            rc = zframe_send (&frame, dest, ZFRAME_MORE);
+            if (rc != 0) {
+                if (errno == EINTR && sent_some)
+                    continue;
+                else
+                    break;
+            }
+            sent_some = true;
+            (void) zlist_pop (self->frames);
+        }
+        if (rc == 0)
+            zmsg_destroy (self_p);
+    }
+    return rc;
+}
 
 //  --------------------------------------------------------------------------
 //  Return size of message, i.e. number of frames (0 or more).
@@ -171,8 +226,33 @@ zmsg_content_size (zmsg_t *self)
 {
     assert (self);
     assert (zmsg_is (self));
-
     return self->content_size;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return message routing ID, if the message came from a ZMQ_SERVER socket.
+//  Else returns zero.
+
+uint32_t
+zmsg_routing_id (zmsg_t *self)
+{
+    assert (self);
+    assert (zmsg_is (self));
+    return self->routing_id;
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set routing ID on message. This is used if/when the message is sent to a
+//  ZMQ_SERVER socket.
+
+void
+zmsg_set_routing_id (zmsg_t *self, uint32_t routing_id)
+{
+    assert (self);
+    assert (zmsg_is (self));
+    self->routing_id = routing_id;
 }
 
 
@@ -632,14 +712,14 @@ zmsg_encode (zmsg_t *self, byte **buffer)
 //  there was insufficient memory to work.
 
 zmsg_t *
-zmsg_decode (byte *buffer, size_t buffer_size)
+zmsg_decode (const byte *buffer, size_t buffer_size)
 {
     zmsg_t *self = zmsg_new ();
     if (!self)
         return NULL;
 
-    byte *source = buffer;
-    byte *limit = buffer + buffer_size;
+    const byte *source = buffer;
+    const byte *limit = buffer + buffer_size;
     while (source < limit) {
         size_t frame_size = *source++;
         if (frame_size == 255) {
@@ -825,9 +905,8 @@ zmsg_recv_nowait (void *source)
     if (!self)
         return NULL;
 
-    void *handle = zsock_resolve (source);
     while (true) {
-        zframe_t *frame = zframe_recv_nowait (handle);
+        zframe_t *frame = zframe_recv_nowait (source);
         if (!frame) {
             zmsg_destroy (&self);
             break;              //  Interrupted or terminated
@@ -1152,6 +1231,48 @@ zmsg_test (bool verbose)
 
     zsock_destroy (&input);
     zsock_destroy (&output);
+
+#if defined (ZMQ_SERVER)
+    //  Create server and client sockets and connect over inproc
+    zsock_t *server = zsock_new_server ("inproc://zmsg-server.test");
+    assert (server);
+    zsock_t *client = zsock_new_client ("inproc://zmsg-server.test");
+    assert (client);
+
+    //  Send request from client to server
+    zmsg_t *request = zmsg_new ();
+    assert (request);
+    zmsg_addstr (request, "Hello");
+    rc = zmsg_send (&request, client);
+    assert (rc == 0);
+    assert (!request);
+
+    //  Read request and send reply
+    request = zmsg_recv (server);
+    assert (request);
+    char *string = zmsg_popstr (request);
+    assert (streq (string, "Hello"));
+    assert (zmsg_routing_id (request));
+    zstr_free (&string);
+
+    zmsg_t *reply = zmsg_new ();
+    assert (reply);
+    zmsg_addstr (reply, "World");
+    zmsg_set_routing_id (reply, zmsg_routing_id (request));
+    rc = zmsg_send (&reply, server);
+    assert (rc == 0);
+
+    //  Read reply
+    reply = zmsg_recv (client);
+    string = zmsg_popstr (reply);
+    assert (streq (string, "World"));
+    assert (zmsg_routing_id (reply) == 0);
+    zmsg_destroy (&reply);
+    zstr_free (&string);
+
+    zsock_destroy (&client);
+    zsock_destroy (&server);
+#endif
 
     //  @end
     printf ("OK\n");
