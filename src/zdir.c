@@ -32,7 +32,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -113,8 +113,7 @@ zdir_t *
 zdir_new (const char *path, const char *parent)
 {
     zdir_t *self = (zdir_t *) zmalloc (sizeof (zdir_t));
-    if (!self)
-        return NULL;
+    assert (self);
 
     if (parent) {
         if (streq (parent, "-")) {
@@ -547,7 +546,7 @@ zdir_resync (zdir_t *self, const char *alias)
     zlist_t *patches = zlist_new ();
     if (!patches)
         return NULL;
-    
+
     zfile_t **files = zdir_flatten (self);
     uint index;
     for (index = 0;; index++) {
@@ -726,6 +725,7 @@ s_zdir_watch_destroy (zdir_watch_t **watch_p)
         zdir_watch_t *watch = *watch_p;
 
         zloop_destroy (&watch->loop);
+        zhash_destroy (&watch->subs);
 
         free (watch);
         *watch_p = NULL;
@@ -833,6 +833,8 @@ s_on_command (zloop_t *loop, zsock_t *reader, void *arg)
         zsys_info ("zdir_watch: Command received: %s", command);
 
     if (streq (command, "$TERM")) {
+        zstr_free (&command);
+        zmsg_destroy (&msg);
         return -1;
     }
     else
@@ -888,6 +890,7 @@ s_on_command (zloop_t *loop, zsock_t *reader, void *arg)
     }
 
     free (command);
+    zmsg_destroy (&msg);
     return 0;
 }
 
@@ -997,7 +1000,7 @@ zdir_test (bool verbose)
     zpoller_t *watch_poll = zpoller_new (watch, NULL);
 
     // poll for a certain timeout before giving up and failing the test.
-    assert(zpoller_wait (watch_poll, 1001) == watch);
+    assert (zpoller_wait (watch_poll, 1001) == watch);
 
     // wait for notification of the file being added
     char *path;
@@ -1023,7 +1026,7 @@ zdir_test (bool verbose)
     zfile_destroy (&newfile);
 
     // poll for a certain timeout before giving up and failing the test.
-    assert(zpoller_wait (watch_poll, 1001) == watch);
+    assert (zpoller_wait (watch_poll, 1001) == watch);
 
     // wait for notification of the file being removed
     rc = zsock_recv (watch, "sp", &path, &patches);

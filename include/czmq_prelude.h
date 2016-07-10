@@ -39,6 +39,7 @@
  *  __UTYPE_HPUX        HP/UX
  *  __UTYPE_ANDROID     Android
  *  __UTYPE_LINUX       Linux
+ *  __UTYPE_GNU         GNU/Hurd
  *  __UTYPE_MIPS        MIPS (BSD 4.3/System V mixture)
  *  __UTYPE_NETBSD      NetBSD
  *  __UTYPE_NEXT        NeXT
@@ -79,6 +80,7 @@
 #   define __MSDOS__
 //  Stop cheeky warnings about "deprecated" functions like fopen
 #   if _MSC_VER >= 1500
+#       undef  _CRT_SECURE_NO_DEPRECATE
 #       define _CRT_SECURE_NO_DEPRECATE
 #       pragma warning(disable: 4996)
 #   endif
@@ -156,6 +158,9 @@
 #   ifndef _DEFAULT_SOURCE
 #   define _DEFAULT_SOURCE                  //  Include stuff from 4.3 BSD Unix
 #   endif
+#elif (defined (__GNU__))
+#   define __UTYPE_GNU
+#   define __UNIX__
 #elif (defined (Mips))
 #   define __UTYPE_MIPS
 #   define __UNIX__
@@ -207,7 +212,9 @@
 //- Always include ZeroMQ headers -------------------------------------------
 
 #include "zmq.h"
-#include "zmq_utils.h"
+#if (ZMQ_VERSION < ZMQ_MAKE_VERSION (4, 2, 0))
+#   include "zmq_utils.h"
+#endif
 
 //- Standard ANSI include files ---------------------------------------------
 
@@ -309,6 +316,9 @@
 #   if (defined (__UTYPE_ANDROID))
 #       include <android/log.h>
 #   endif
+#   if (defined (__UTYPE_LINUX) && defined (HAVE_LIBSYSTEMD))
+#       include <systemd/sd-daemon.h>
+#   endif
 #endif
 
 #if (defined (__VMS__))
@@ -391,7 +401,19 @@
 typedef unsigned char   byte;           //  Single unsigned byte = 8 bits
 typedef unsigned short  dbyte;          //  Double byte = 16 bits
 typedef unsigned int    qbyte;          //  Quad byte = 32 bits
-typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
+typedef struct sockaddr_in  inaddr_t;   //  Internet socket address structure
+typedef struct sockaddr_in6 in6addr_t;  //  Internet 6 socket address structure
+
+// Common structure to hold inaddr_t and in6addr_t with length
+typedef struct {
+    union {
+        inaddr_t __addr;          //  IPv4 address
+        in6addr_t __addr6;        //  IPv6 address
+    } __inaddr_u;
+#define ipv4addr   __inaddr_u.__addr
+#define ipv6addr   __inaddr_u.__addr6
+    int inaddrlen;
+} inaddr_storage_t;
 
 //- Inevitable macros -------------------------------------------------------
 
@@ -438,11 +460,10 @@ typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
     typedef unsigned int  uint;
 #   if (!defined (__MINGW32__))
     typedef int mode_t;
-#       if defined (__IS_64BIT__)
-    typedef long long ssize_t;
-#       else
-    typedef long ssize_t;
-#       endif
+#     if !defined (_SSIZE_T_DEFINED)
+typedef intptr_t ssize_t;
+#       define _SSIZE_T_DEFINED
+#     endif
 #   endif
 #   if ((!defined (__MINGW32__) \
     || (defined (__MINGW32__) && defined (__IS_64BIT__))) \
@@ -497,30 +518,11 @@ typedef struct sockaddr_in inaddr_t;    //  Internet socket address structure
 
 //- Non-portable declaration specifiers -------------------------------------
 
-#if defined (__WINDOWS__)
-#   if defined LIBCZMQ_STATIC
-#       define CZMQ_EXPORT
-#   elif defined LIBCZMQ_EXPORTS
-#       define CZMQ_EXPORT __declspec(dllexport)
-#   else
-#       define CZMQ_EXPORT __declspec(dllimport)
-#   endif
-#else
-#   define CZMQ_EXPORT
-#endif
-
 //  For thread-local storage
 #if defined (__WINDOWS__)
 #   define CZMQ_THREADLS __declspec(thread)
 #else
 #   define CZMQ_THREADLS __thread
-#endif
-
-//- Memory allocations ------------------------------------------------------
-#if defined(__cplusplus)
-   extern "C" CZMQ_EXPORT volatile uint64_t zsys_allocs;
-#else
-   extern CZMQ_EXPORT volatile uint64_t zsys_allocs;
 #endif
 
 //  Replacement for malloc() which asserts if we run out of heap, and
@@ -529,10 +531,6 @@ static inline void *
 safe_malloc (size_t size, const char *file, unsigned line)
 {
 //     printf ("%s:%u %08d\n", file, line, (int) size);
-#if defined (__UTYPE_LINUX) && defined (__IS_64BIT__)
-    //  On GCC we count zmalloc memory allocations
-    __sync_add_and_fetch (&zsys_allocs, 1);
-#endif
     void *mem = calloc (1, size);
     if (mem == NULL) {
         fprintf (stderr, "FATAL ERROR at %s:%u\n", file, line);
@@ -574,6 +572,8 @@ typedef int SOCKET;
 
 #if defined (HAVE_LINUX_WIRELESS_H)
 #   include <linux/wireless.h>
+//  This would normally come from net/if.h
+unsigned int if_nametoindex (const char *ifname);
 #else
 #   if defined (HAVE_NET_IF_H)
 #       include <net/if.h>

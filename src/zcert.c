@@ -32,7 +32,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -76,29 +76,25 @@ zcert_new (void)
 //  Constructor, accepts public/secret key pair from caller
 
 zcert_t *
-zcert_new_from (byte *public_key, byte *secret_key)
+zcert_new_from (const byte *public_key, const byte *secret_key)
 {
     zcert_t *self = (zcert_t *) zmalloc (sizeof (zcert_t));
-    if (!self)
-        return NULL;
+    assert (self);
     assert (public_key);
     assert (secret_key);
 
     self->metadata = zhash_new ();
-    if (self->metadata) {
-        zhash_autofree (self->metadata);
-        memcpy (self->public_key, public_key, 32);
-        memcpy (self->secret_key, secret_key, 32);
+    assert (self->metadata);
+    zhash_autofree (self->metadata);
+    memcpy (self->public_key, public_key, 32);
+    memcpy (self->secret_key, secret_key, 32);
 #if (ZMQ_VERSION_MAJOR == 4)
-        zmq_z85_encode (self->public_txt, self->public_key, 32);
-        zmq_z85_encode (self->secret_txt, self->secret_key, 32);
+    zmq_z85_encode (self->public_txt, self->public_key, 32);
+    zmq_z85_encode (self->secret_txt, self->secret_key, 32);
 #else
-        strcpy (self->public_txt, FORTY_ZEROES);
-        strcpy (self->secret_txt, FORTY_ZEROES);
+    strcpy (self->public_txt, FORTY_ZEROES);
+    strcpy (self->secret_txt, FORTY_ZEROES);
 #endif
-    }
-    else
-        zcert_destroy (&self);
     return self;
 }
 
@@ -123,7 +119,7 @@ zcert_destroy (zcert_t **self_p)
 //  --------------------------------------------------------------------------
 //  Return public part of key pair as 32-byte binary string
 
-byte *
+const byte *
 zcert_public_key (zcert_t *self)
 {
     assert (self);
@@ -134,7 +130,7 @@ zcert_public_key (zcert_t *self)
 //  --------------------------------------------------------------------------
 //  Return secret part of key pair as 32-byte binary string
 
-byte *
+const byte *
 zcert_secret_key (zcert_t *self)
 {
     assert (self);
@@ -145,7 +141,7 @@ zcert_secret_key (zcert_t *self)
 //  --------------------------------------------------------------------------
 //  Return public part of key pair as Z85 armored string
 
-char *
+const char *
 zcert_public_txt (zcert_t *self)
 {
     assert (self);
@@ -156,7 +152,7 @@ zcert_public_txt (zcert_t *self)
 //  --------------------------------------------------------------------------
 //  Return secret part of key pair as Z85 armored string
 
-char *
+const char *
 zcert_secret_txt (zcert_t *self)
 {
     assert (self);
@@ -170,21 +166,37 @@ zcert_secret_txt (zcert_t *self)
 void
 zcert_set_meta (zcert_t *self, const char *name, const char *format, ...)
 {
+    assert (self);
+    assert (name);
+    assert (format);
+
     va_list argptr;
     va_start (argptr, format);
     char *value = zsys_vprintf (format, argptr);
     va_end (argptr);
     assert (value);
     zhash_insert (self->metadata, name, value);
-    free (value);
+    zstr_free (&value);
 }
 
+
+//  --------------------------------------------------------------------------
+//  Unset certificate metadata.
+
+void
+zcert_unset_meta (zcert_t *self, const char *name)
+{
+    assert (self);
+    assert (name);
+
+    zhash_delete (self->metadata, name);
+}
 
 //  --------------------------------------------------------------------------
 //  Get metadata value from certificate; if the metadata value doesn't
 //  exist, returns NULL.
 
-char *
+const char *
 zcert_meta (zcert_t *self, const char *name)
 {
     assert (self);
@@ -237,7 +249,7 @@ zcert_load (const char *filename)
             zconfig_t *metadata = zconfig_locate (root, "/metadata");
             zconfig_t *item = metadata? zconfig_child (metadata): NULL;
             while (item) {
-                zcert_set_meta (self, zconfig_name (item), zconfig_value (item));
+                zcert_set_meta (self, zconfig_name (item), "%s", zconfig_value (item));
                 item = zconfig_next (item);
             }
         }
@@ -280,12 +292,13 @@ zcert_save (zcert_t *self, const char *filename)
     assert (filename);
 
     //  Save public certificate using specified filename
-    zcert_save_public (self, filename);
+    int rc = zcert_save_public (self, filename);
+    if (rc == -1) return rc;
 
     //  Now save secret certificate using filename with "_secret" suffix
     char filename_secret [256];
     snprintf (filename_secret, 256, "%s_secret", filename);
-    int rc = zcert_save_secret (self, filename_secret);
+    rc = zcert_save_secret (self, filename_secret);
     return rc;
 }
 
@@ -309,9 +322,10 @@ zcert_save_public (zcert_t *self, const char *filename)
                          "   directory, in the .curve subdirectory.");
 
     zconfig_put (self->config, "/curve/public-key", self->public_txt);
-    int rc = zconfig_save (self->config, filename);
-    return rc;
+
+    return zconfig_save (self->config, filename);;
 }
+
 
 //  --------------------------------------------------------------------------
 //  Save public certificate only to file for persistent storage.
@@ -343,11 +357,11 @@ zcert_save_secret (zcert_t *self, const char *filename)
 //  undefined, and this certificate will not work successfully.
 
 void
-zcert_apply (zcert_t *self, void *zocket)
+zcert_apply (zcert_t *self, void *socket)
 {
     assert (self);
 #if (ZMQ_VERSION_MAJOR == 4)
-    void *handle = zsock_resolve (zocket);
+    void *handle = zsock_resolve (socket);
     if (zsys_has_curve ()) {
         zsock_set_curve_secretkey_bin (handle, self->secret_key);
         zsock_set_curve_publickey_bin (handle, self->public_key);
@@ -387,8 +401,8 @@ zcert_eq (zcert_t *self, zcert_t *compare)
     assert (self);
     assert (compare);
 
-    return (  streq (self->public_txt, compare->public_txt)
-           && streq (self->secret_txt, compare->secret_txt));
+    return (streq (self->public_txt, compare->public_txt)
+         && streq (self->secret_txt, compare->secret_txt));
 }
 
 
@@ -453,6 +467,8 @@ zcert_test (bool verbose)
     zcert_set_meta (cert, "name", "Pieter Hintjens");
     zcert_set_meta (cert, "organization", "iMatix Corporation");
     zcert_set_meta (cert, "version", "%d", 1);
+    zcert_set_meta (cert, "delete_me", "now");
+    zcert_unset_meta (cert, "delete_me");
     assert (streq (zcert_meta (cert, "email"), "ph@imatix.com"));
     zlist_t *keys = zcert_meta_keys (cert);
     assert (zlist_size (keys) == 4);

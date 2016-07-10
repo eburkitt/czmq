@@ -10,17 +10,15 @@
      * The XML model used for this code generation: zgossip.xml, or
      * The code generation script that built this file: zproto_server_c
     ************************************************************************
-    Copyright (c) 1991-2012 iMatix Corporation -- http://www.imatix.com                
-    Copyright other contributors as noted in the AUTHORS file.                         
-                                                                                       
-    This file is part of CZMQ, the high-level C binding for 0MQ: http://czmq.zeromq.org
-                                                                                       
-    This Source Code Form is subject to the terms of the Mozilla Public                
-    License, v. 2.0. If a copy of the MPL was not distributed with this                
-    file, You can obtain one at http://mozilla.org/MPL/2.0/.                           
+    Copyright (c) the Contributors as noted in the AUTHORS file.       
+    This file is part of CZMQ, the high-level C binding for 0MQ:       
+    http://czmq.zeromq.org.                                            
+                                                                       
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.           
     =========================================================================
 */
-
 
 //  ---------------------------------------------------------------------------
 //  State machine constants
@@ -829,7 +827,7 @@ s_server_handle_pipe (zloop_t *loop, zsock_t *reader, void *argument)
         zconfig_put (self->config, path, value);
         if (streq (path, "server/animate")) {
             zsys_warning ("'%s' is deprecated, use VERBOSE command instead", path);
-            self->verbose = atoi (value);
+            self->verbose = (atoi (value) == 1);
         }
         s_server_config_global (self);
         free (path);
@@ -863,7 +861,7 @@ s_server_handle_protocol (zloop_t *loop, zsock_t *reader, void *argument)
     //  of polling and the reactor:
     while (zsock_events (self->router) & ZMQ_POLLIN) {
         if (zgossip_msg_recv (self->message, self->router))
-            return -1;              //  Interrupted; exit zloop
+            return -1;      //  Interrupted; exit zloop
 
         //  TODO: use binary hashing on routing_id
         char *hashkey = zframe_strhex (zgossip_msg_routing_id (self->message));

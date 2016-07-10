@@ -20,8 +20,7 @@
 @end
 */
 
-#include "platform.h"
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  --------------------------------------------------------------------------
 //  Signal handling
@@ -29,7 +28,6 @@
 //  These are global variables accessible to CZMQ application code
 volatile int zsys_interrupted = 0;  //  Current name
 volatile int zctx_interrupted = 0;  //  Deprecated name
-volatile uint64_t zsys_allocs = 0;
 
 static void s_signal_handler (int signal_value);
 
@@ -72,6 +70,9 @@ static size_t s_rcvhwm = 1000;      //  ZSYS_RCVHWM=1000
 static size_t s_pipehwm = 1000;     //  ZSYS_PIPEHWM=1000
 static int s_ipv6 = 0;              //  ZSYS_IPV6=0
 static char *s_interface = NULL;    //  ZSYS_INTERFACE=
+static char *s_ipv6_address = NULL; //  ZSYS_IPV6_ADDRESS=
+static char *s_ipv6_mcast_address = NULL; //  ZSYS_IPV6_MCAST_ADDRESS=
+static int s_auto_use_fd = 0;       //  ZSYS_AUTO_USE_FD=0
 static char *s_logident = NULL;     //  ZSYS_LOGIDENT=
 static FILE *s_logstream = NULL;    //  ZSYS_LOGSTREAM=stdout/stderr
 static bool s_logsystem = false;    //  ZSYS_LOGSYSTEM=true/false
@@ -163,6 +164,10 @@ zsys_init (void)
         if (streq (getenv ("ZSYS_LOGSYSTEM"), "false"))
             s_logsystem = false;
     }
+
+    if (getenv ("ZSYS_AUTO_USE_FD"))
+        s_auto_use_fd = atoi (getenv ("ZSYS_AUTO_USE_FD"));
+
     zsys_catch_interrupts ();
 
     ZMUTEX_INIT (s_mutex);
@@ -186,6 +191,12 @@ zsys_init (void)
     //  s_initialized is set in order to avoid an infinite recursion
     if (getenv ("ZSYS_INTERFACE"))
         zsys_set_interface (getenv ("ZSYS_INTERFACE"));
+
+    if (getenv ("ZSYS_IPV6_ADDRESS"))
+        zsys_set_ipv6_address (getenv ("ZSYS_IPV6_ADDRESS"));
+
+    if (getenv ("ZSYS_IPV6_MCAST_ADDRESS"))
+        zsys_set_ipv6_mcast_address (getenv ("ZSYS_IPV6_MCAST_ADDRESS"));
 
     if (getenv ("ZSYS_LOGIDENT"))
         zsys_set_logident (getenv ("ZSYS_LOGIDENT"));
@@ -218,9 +229,8 @@ zsys_shutdown (void)
         zclock_sleep (200);
 
     //  Close logsender socket if opened (don't do this in critical section)
-    if (s_logsender) {
+    if (s_logsender) 
         zsock_destroy (&s_logsender);
-    }
 
     //  No matter, we are now going to shut down
     //  Print the source reference for any sockets the app did not
@@ -248,6 +258,8 @@ zsys_shutdown (void)
 
     //  Free dynamically allocated properties
     free (s_interface);
+    free (s_ipv6_address);
+    free (s_ipv6_mcast_address);
     free (s_logident);
 
 #if defined (__UNIX__)
@@ -280,7 +292,9 @@ zsys_socket (int type, const char *filename, size_t line_nbr)
         zsock_set_linger (handle, (int) s_linger);
 #if (ZMQ_VERSION_MAJOR == 2)
         //  For ZeroMQ/2.x we use sndhwm for both send and receive
-        zsock_set_hwm (handle, s_sndhwm);
+        //  Use the deprecated zsockopt API as the current zsock_option
+        //  API does not support ZeroMQ/2.x
+        zsocket_set_hwm (handle, s_sndhwm);
 #else
         //  For later versions we use separate SNDHWM and RCVHWM
         zsock_set_sndhwm (handle, (int) s_sndhwm);
@@ -352,11 +366,17 @@ zsys_sockname (int socktype)
         "PAIR", "PUB", "SUB", "REQ", "REP",
         "DEALER", "ROUTER", "PULL", "PUSH",
         "XPUB", "XSUB", "STREAM",
-        "SERVER", "CLIENT"
+        "SERVER", "CLIENT",
+        "RADIO", "DISH",
+        "SCATTER", "GATHER"
     };
     //  This array matches ZMQ_XXX type definitions
     assert (ZMQ_PAIR == 0);
-#if defined (ZMQ_CLIENT)
+#if defined (ZMQ_SCATTER)
+    assert (socktype >= 0 && socktype <= ZMQ_SCATTER);
+#elif defined (ZMQ_DISH)
+    assert (socktype >= 0 && socktype <= ZMQ_DISH);
+#elif defined (ZMQ_CLIENT)
     assert (socktype >= 0 && socktype <= ZMQ_CLIENT);
 #elif defined (ZMQ_STREAM)
     assert (socktype >= 0 && socktype <= ZMQ_STREAM);
@@ -377,14 +397,14 @@ zsys_create_pipe (zsock_t **backend_p)
 {
     zsock_t *frontend = zsock_new (ZMQ_PAIR);
     zsock_t *backend = zsock_new (ZMQ_PAIR);
-    if (!frontend || !backend) {
-        zsock_destroy (&frontend);
-        zsock_destroy (&backend);
-        return frontend;
-    }
+    assert (frontend);
+    assert (backend);
+
 #if (ZMQ_VERSION_MAJOR == 2)
-    zsock_set_hwm (frontend, zsys_pipehwm ());
-    zsock_set_hwm (backend, zsys_pipehwm ());
+    //  Use the deprecated zsockopt API as the current zsock_option
+    //  API does not support ZeroMQ/2.x
+    zsocket_set_hwm (zsock_resolve (frontend), zsys_pipehwm ());
+    zsocket_set_hwm (zsock_resolve (backend), zsys_pipehwm ());
 #else
     zsock_set_sndhwm (frontend, (int) zsys_pipehwm ());
     zsock_set_sndhwm (backend, (int) zsys_pipehwm ());
@@ -484,7 +504,8 @@ zsys_catch_interrupts (void)
 {
     //  Catch SIGINT and SIGTERM unless ZSYS_SIGHANDLER=false
     if ((getenv ("ZSYS_SIGHANDLER") == NULL
-        ||  strneq (getenv ("ZSYS_SIGHANDLER"), "false")) && handle_signals)
+    ||   strneq (getenv ("ZSYS_SIGHANDLER"), "false"))
+    &&   handle_signals)
         zsys_handler_set (s_signal_handler);
 }
 
@@ -651,7 +672,7 @@ zsys_dir_create (const char *pathname, ...)
         *slash = '/';
         slash = strchr (slash + 1, '/');
     }
-    free (formatted);
+    zstr_free (&formatted);
     return 0;
 }
 
@@ -674,7 +695,7 @@ zsys_dir_delete (const char *pathname, ...)
 #else
     int rc = rmdir (formatted);
 #endif
-    free (formatted);
+    zstr_free (&formatted);
     return rc;
 }
 
@@ -815,7 +836,11 @@ zsys_udp_new (bool routable)
 {
     //  We haven't implemented multicast yet
     assert (!routable);
-    SOCKET udpsock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    SOCKET udpsock;
+    if (zsys_ipv6 ())
+        udpsock = socket (AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
+    else
+        udpsock = socket (AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (udpsock == INVALID_SOCKET) {
         zsys_socket_error ("socket");
         return INVALID_SOCKET;
@@ -861,7 +886,7 @@ zsys_udp_close (SOCKET handle)
 //  interface having disappeared (happens easily with WiFi)
 
 int
-zsys_udp_send (SOCKET udpsock, zframe_t *frame, inaddr_t *address)
+zsys_udp_send (SOCKET udpsock, zframe_t *frame, inaddr_t *address, int addrlen)
 {
     assert (frame);
     assert (address);
@@ -869,7 +894,7 @@ zsys_udp_send (SOCKET udpsock, zframe_t *frame, inaddr_t *address)
     if (sendto (udpsock,
         (char *) zframe_data (frame), (int) zframe_size (frame),
         0, //  Flags
-        (struct sockaddr *) address, (int) sizeof (inaddr_t)) == -1) {
+        (struct sockaddr *) address, addrlen) == -1) {
         zsys_debug ("zsys_udp_send: failed, reason=%s", strerror (errno));
         return -1;              //  UDP broadcast not possible
     }
@@ -883,26 +908,32 @@ zsys_udp_send (SOCKET udpsock, zframe_t *frame, inaddr_t *address)
 //  The peername must be a char [INET_ADDRSTRLEN] array.
 
 zframe_t *
-zsys_udp_recv (SOCKET udpsock, char *peername)
+zsys_udp_recv (SOCKET udpsock, char *peername, int peerlen)
 {
     char buffer [UDP_FRAME_MAX];
-    inaddr_t address;
-    socklen_t address_len = sizeof (inaddr_t);
+    in6addr_t address6;
+#if (!defined (__WINDOWS__))
+    inaddr_t *address = (inaddr_t *) &address6;
+#endif
+    socklen_t address_len = sizeof (in6addr_t);
     ssize_t size = recvfrom (
         udpsock,
         buffer, UDP_FRAME_MAX,
         0,      //  Flags
-        (struct sockaddr *) &address, &address_len);
+        (struct sockaddr *) &address6, &address_len);
 
     if (size == SOCKET_ERROR)
         zsys_socket_error ("recvfrom");
 
     //  Get sender address as printable string
 #if (defined (__WINDOWS__))
-    getnameinfo ((struct sockaddr *) &address, address_len,
-                 peername, INET_ADDRSTRLEN, NULL, 0, NI_NUMERICHOST);
+    getnameinfo ((struct sockaddr *) &address6, address_len,
+                 peername, peerlen, NULL, 0, NI_NUMERICHOST);
 #else
-    inet_ntop (AF_INET, &address.sin_addr, peername, address_len);
+    if (address6.sin6_family == AF_INET6)
+        inet_ntop (AF_INET6, &address6.sin6_addr, peername, address_len);
+    else
+        inet_ntop (AF_INET, &address->sin_addr, peername, address_len);
 #endif
     return zframe_new (buffer, size);
 }
@@ -915,6 +946,8 @@ zsys_udp_recv (SOCKET udpsock, char *peername)
 void
 zsys_socket_error (const char *reason)
 {
+    bool check_errno;
+
 #if defined (__WINDOWS__)
     switch (WSAGetLastError ()) {
         case WSAEINTR:        errno = EINTR;      break;
@@ -929,32 +962,34 @@ zsys_socket_error (const char *reason)
         default:              errno = GetLastError ();
     }
 #endif
-    if (errno == EAGAIN
-    ||  errno == ENETDOWN
-    ||  errno == EHOSTUNREACH
-    ||  errno == ENETUNREACH
-    ||  errno == EINTR
-    ||  errno == EPIPE
-    ||  errno == ECONNRESET
+
+    check_errno = (errno == EAGAIN
+                  ||  errno == ENETDOWN
+                  ||  errno == EHOSTUNREACH
+                  ||  errno == ENETUNREACH
+                  ||  errno == EINTR
+                  ||  errno == EPIPE
+                  ||  errno == ECONNRESET);
 #if defined (ENOPROTOOPT)
-    ||  errno == ENOPROTOOPT
+    check_errno = (check_errno ||  errno == ENOPROTOOPT);
 #endif
 #if defined (EHOSTDOWN)
-    ||  errno == EHOSTDOWN
+    check_errno = (check_errno ||  errno == EHOSTDOWN);
 #endif
 #if defined (EOPNOTSUPP)
-    ||  errno == EOPNOTSUPP
+    check_errno = (check_errno ||  errno == EOPNOTSUPP);
 #endif
 #if defined (EWOULDBLOCK)
-    ||  errno == EWOULDBLOCK
+    check_errno = (check_errno ||  errno == EWOULDBLOCK);
 #endif
 #if defined (EPROTO)
-    ||  errno == EPROTO
+    check_errno = (check_errno ||  errno == EPROTO);
 #endif
 #if defined (ENONET)
-    ||  errno == ENONET
+    check_errno = (check_errno ||  errno == ENONET);
 #endif
-    )
+
+    if (check_errno)
         return;             //  Ignore error and try again
     else {
         zsys_error ("(UDP) error '%s' on %s", strerror (errno), reason);
@@ -1075,8 +1110,8 @@ zsys_run_as (const char *lockfile, const char *group, const char *user)
         }
         //   We record the current process id in the lock file
         char pid_buffer [10];
-        snprintf (pid_buffer, sizeof (pid_buffer), "%6d\n", getpid ());
-        if (write (handle, pid_buffer, strlen (pid_buffer)) != strlen (pid_buffer)) {
+        snprintf (pid_buffer, sizeof (pid_buffer), "%6" PRIi64 "\n", (int64_t)getpid ());
+        if ((size_t) write (handle, pid_buffer, strlen (pid_buffer)) != strlen (pid_buffer)) {
             zsys_error ("cannot write to lockfile: %s", strerror (errno));
             close (handle);
             return -1;
@@ -1319,6 +1354,16 @@ zsys_set_ipv6 (int ipv6)
 
 
 //  --------------------------------------------------------------------------
+//  Return use of IPv6 for zsock instances.
+
+int
+zsys_ipv6 (void)
+{
+    return s_ipv6;
+}
+
+
+//  --------------------------------------------------------------------------
 //  Set network interface name to use for broadcasts, particularly zbeacon.
 //  This lets the interface be configured for test environments where required.
 //  For example, on Mac OS X, zbeacon cannot bind to 255.255.255.255 which is
@@ -1343,6 +1388,88 @@ const char *
 zsys_interface (void)
 {
     return s_interface? s_interface: "";
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set IPv6 address to use zbeacon socket, particularly for receiving zbeacon.
+//  This needs to be set IPv6 is enabled as IPv6 can have multiple addresses
+//  on a given interface. If the environment variable ZSYS_IPV6_ADDRESS is set,
+//  use that as the default IPv6 address.
+
+void
+zsys_set_ipv6_address (const char *value)
+{
+    zsys_init ();
+    free (s_ipv6_address);
+    s_ipv6_address = strdup (value);
+    assert (s_ipv6_address);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return IPv6 address to use for zbeacon reception, or "" if none was set.
+
+const char *
+zsys_ipv6_address (void)
+{
+    return s_ipv6_address? s_ipv6_address: "";
+}
+
+
+//  --------------------------------------------------------------------------
+//  Set IPv6 milticast address to use for sending zbeacon messages. This needs
+//  to be set if IPv6 is enabled. If the environment variable
+//  ZSYS_IPV6_MCAST_ADDRESS is set, use that as the default IPv6 multicast
+//  address.
+
+void
+zsys_set_ipv6_mcast_address (const char *value)
+{
+    zsys_init ();
+    free (s_ipv6_mcast_address);
+    s_ipv6_mcast_address = strdup (value);
+    assert (s_ipv6_mcast_address);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return IPv6 multicast address to use for sending zbeacon, or "" if none was
+//  set.
+
+const char *
+zsys_ipv6_mcast_address (void)
+{
+    return s_ipv6_mcast_address? s_ipv6_mcast_address: "";
+}
+
+
+//  --------------------------------------------------------------------------
+//  Configure the automatic use of pre-allocated FDs when creating new sockets.
+//  If 0 (default), nothing will happen. Else, when a new socket is bound, the
+//  system API will be used to check if an existing pre-allocated FD with a
+//  matching port (if TCP) or path (if IPC) exists, and if it does it will be
+//  set via the ZMQ_USE_FD socket option so that the library will use it
+//  instead of creating a new socket.
+
+
+void
+zsys_set_auto_use_fd (int auto_use_fd)
+{
+    zsys_init ();
+    ZMUTEX_LOCK (s_mutex);
+    s_auto_use_fd = auto_use_fd;
+    ZMUTEX_UNLOCK (s_mutex);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Return use of automatic pre-allocated FDs for zsock instances.
+
+int
+zsys_auto_use_fd (void)
+{
+    return s_auto_use_fd;
 }
 
 
@@ -1400,7 +1527,7 @@ zsys_set_logsender (const char *endpoint)
             assert (s_logsender);
         }
         //  Bind/connect to specified endpoint(s) using zsock_attach() syntax
-	int rc = zsock_attach (s_logsender, endpoint, true);
+        int rc = zsock_attach (s_logsender, endpoint, true);
         assert (rc == 0);
     }
     else
@@ -1473,10 +1600,6 @@ s_log (char loglevel, char *string)
     else
 #   endif
 #endif
-    //  Set s_logstream to stdout by default, unless we're using s_logsystem
-    if (!s_logstream)
-        s_logstream = stdout;
-
     if (s_logstream || s_logsender) {
         time_t curtime = time (NULL);
         struct tm *loctime = localtime (&curtime);
@@ -1509,7 +1632,7 @@ zsys_error (const char *format, ...)
     char *string = zsys_vprintf (format, argptr);
     va_end (argptr);
     s_log ('E', string);
-    free (string);
+    zstr_free (&string);
 }
 
 
@@ -1524,7 +1647,7 @@ zsys_warning (const char *format, ...)
     char *string = zsys_vprintf (format, argptr);
     va_end (argptr);
     s_log ('W', string);
-    free (string);
+    zstr_free (&string);
 }
 
 
@@ -1539,7 +1662,7 @@ zsys_notice (const char *format, ...)
     char *string = zsys_vprintf (format, argptr);
     va_end (argptr);
     s_log ('N', string);
-    free (string);
+    zstr_free (&string);
 }
 
 
@@ -1554,7 +1677,7 @@ zsys_info (const char *format, ...)
     char *string = zsys_vprintf (format, argptr);
     va_end (argptr);
     s_log ('I', string);
-    free (string);
+    zstr_free (&string);
 }
 
 
@@ -1569,7 +1692,7 @@ zsys_debug (const char *format, ...)
     char *string = zsys_vprintf (format, argptr);
     va_end (argptr);
     s_log ('D', string);
-    free (string);
+    zstr_free (&string);
 }
 
 
@@ -1595,8 +1718,6 @@ zsys_test (bool verbose)
         free (hostname);
         zsys_info ("system limit is %zu ZeroMQ sockets", zsys_socket_limit ());
     }
-    zsys_set_io_threads (1);
-    zsys_set_max_sockets (0);
     zsys_set_linger (0);
     zsys_set_sndhwm (1000);
     zsys_set_rcvhwm (1000);
@@ -1688,6 +1809,9 @@ zsys_test (bool verbose)
     }
     zsys_close (logger, NULL, 0);
     //  @end
+
+    zsys_set_auto_use_fd (1);
+    assert (zsys_auto_use_fd () == 1);
 
     printf ("OK\n");
 }

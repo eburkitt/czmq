@@ -30,7 +30,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 static int
 s_send_string (void *dest, bool more, char *string)
@@ -42,6 +42,12 @@ s_send_string (void *dest, bool more, char *string)
     zmq_msg_t message;
     zmq_msg_init_size (&message, len);
     memcpy (zmq_msg_data (&message), string, len);
+
+#if defined (ZMQ_SERVER)
+    //  Set routing ID if we're sending to a SERVER socket (ZMQ 4.2 and later)
+    if (zsock_is (dest) && zsock_type (dest) == ZMQ_SERVER)
+        zmq_msg_set_routing_id (&message, zsock_routing_id ((zsock_t *) dest));
+#endif
     if (zmq_sendmsg (handle, &message, more? ZMQ_SNDMORE: 0) == -1) {
         zmq_msg_close (&message);
         return -1;
@@ -102,6 +108,11 @@ zstr_recvx (void *source, char **string_p, ...)
     if (!msg)
         return -1;
 
+#if defined (ZMQ_SERVER)
+    //  Grab routing ID if we're reading from a SERVER socket (ZMQ 4.2 and later)
+    if (zsock_is (source) && zsock_type (source) == ZMQ_SERVER)
+        zsock_set_routing_id ((zsock_t *) source, zmsg_routing_id (msg));
+#endif
     //  Filter a signal that may come from a dying actor
     if (zmsg_signal (msg) >= 0) {
         zmsg_destroy (&msg);
@@ -169,7 +180,7 @@ zstr_sendf (void *dest, const char *format, ...)
     va_end (argptr);
 
     int rc = s_send_string (dest, false, string);
-    free (string);
+    zstr_free (&string);
     return rc;
 }
 
@@ -194,7 +205,7 @@ zstr_sendfm (void *dest, const char *format, ...)
     va_end (argptr);
 
     int rc = s_send_string (dest, true, string);
-    free (string);
+    zstr_free (&string);
     return rc;
 }
 
@@ -216,7 +227,27 @@ zstr_sendx (void *dest, const char *string, ...)
         string = va_arg (args, char *);
     }
     va_end (args);
+
+#if defined (ZMQ_SERVER)
+    //  Grab routing ID if we're reading from a SERVER socket (ZMQ 4.2 and later)
+    if (zsock_is (dest) && zsock_type (dest) == ZMQ_SERVER)
+        zmsg_set_routing_id (msg, zsock_routing_id ((zsock_t *) dest));
+#endif
     return zmsg_send (&msg, dest);
+}
+
+
+//  --------------------------------------------------------------------------
+//  Accepts a void pointer and returns a fresh character string. If source is
+//  null, returns an empty string.
+
+char *
+zstr_str (void *source)
+{
+    if (source)
+        return strdup ((char *) source);
+    else
+        return strdup ("");
 }
 
 
@@ -298,6 +329,58 @@ zstr_test (bool verbose)
 
     zsock_destroy (&input);
     zsock_destroy (&output);
+
+#if defined (ZMQ_SERVER)
+    //  Test SERVER/CLIENT over zstr
+    zsock_t *server = zsock_new_server ("inproc://zstr-test-routing");
+    zsock_t *client = zsock_new_client ("inproc://zstr-test-routing");;
+    assert (server);
+    assert (client);
+
+    //  Try normal ping-pong to check reply routing ID
+    int rc = zstr_send (client, "Hello");
+    assert (rc == 0);
+    char *request = zstr_recv (server);
+    assert (streq (request, "Hello"));
+    assert (zsock_routing_id (server));
+    free (request);
+
+    rc = zstr_send (server, "World");
+    assert (rc == 0);
+    char *reply = zstr_recv (client);
+    assert (streq (reply, "World"));
+    free (reply);
+
+    rc = zstr_sendf (server, "%s", "World");
+    assert (rc == 0);
+    reply = zstr_recv (client);
+    assert (streq (reply, "World"));
+    free (reply);
+
+    //  Try ping-pong using sendx and recx
+    rc = zstr_sendx (client, "Hello", NULL);
+    assert (rc == 0);
+    rc = zstr_recvx (server, &request, NULL);
+    assert (rc >= 0);
+    assert (streq (request, "Hello"));
+    free (request);
+
+    rc = zstr_sendx (server, "World", NULL);
+    assert (rc == 0);
+    rc = zstr_recvx (client, &reply, NULL);
+    assert (rc >= 0);
+    assert (streq (reply, "World"));
+    free (reply);
+
+    //  Client and server disallow multipart
+    rc = zstr_sendm (client, "Hello");
+    assert (rc == -1);
+    rc = zstr_sendm (server, "World");
+    assert (rc == -1);
+
+    zsock_destroy (&client);
+    zsock_destroy (&server);
+#endif
     //  @end
 
     printf ("OK\n");

@@ -25,8 +25,7 @@
 @end
 */
 
-#include "platform.h"
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Constants
 #define INTERVAL_DFLT  1000         //  Default interval = 1 second
@@ -56,7 +55,8 @@ s_self_destroy (self_t **self_p)
         self_t *self = *self_p;
         zframe_destroy (&self->transmit);
         zframe_destroy (&self->filter);
-        zsys_udp_close (self->udpsock);
+        if (self->udpsock) // don't close STDIN
+            zsys_udp_close (self->udpsock);
         free (self);
         *self_p = NULL;
     }
@@ -66,8 +66,7 @@ static self_t *
 s_self_new (zsock_t *pipe)
 {
     self_t *self = (self_t *) zmalloc (sizeof (self_t));
-    if (!self)
-        return NULL;
+    assert (self);
     self->pipe = pipe;
     return self;
 }
@@ -231,7 +230,7 @@ s_self_handle_udp (self_t *self)
     assert (self);
 
     char peername [INET_ADDRSTRLEN];
-    zframe_t *frame = zsys_udp_recv (self->udpsock, peername);
+    zframe_t *frame = zsys_udp_recv (self->udpsock, peername, INET_ADDRSTRLEN);
 
     //  If filter is set, check that beacon matches it
     bool is_valid = false;
@@ -298,7 +297,7 @@ zbeacon (zsock_t *pipe, void *args)
         if (self->transmit
         &&  zclock_mono () >= self->ping_at) {
             //  Send beacon to any listening peers
-            if (zsys_udp_send (self->udpsock, self->transmit, &self->broadcast))
+            if (zsys_udp_send (self->udpsock, self->transmit, &self->broadcast, sizeof (inaddr_t)))
                 //  Try to recreate UDP socket on interface
                 s_self_prepare_udp (self);
             self->ping_at = zclock_mono () + self->interval;

@@ -22,7 +22,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -42,8 +42,7 @@ zmutex_t *
 zmutex_new (void)
 {
     zmutex_t *self = (zmutex_t *) zmalloc (sizeof (zmutex_t));
-    if (!self)
-        return NULL;
+    assert (self);
 #if defined (__UNIX__)
     if (pthread_mutex_init (&self->mutex, NULL) != 0) {
         free (self);

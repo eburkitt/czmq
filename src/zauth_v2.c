@@ -22,7 +22,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 #define ZAP_ENDPOINT  "inproc://zeromq.zap.01"
 
 //  Structure of our class
@@ -53,21 +53,17 @@ zauth_t *
 zauth_new (zctx_t *ctx)
 {
     zauth_t *self = (zauth_t *) zmalloc (sizeof (zauth_t));
-    if (!self)
-        return NULL;
+    assert (self);
 
     //  Start background agent and wait for it to initialize
     assert (ctx);
     self->pipe = zthread_fork (ctx, s_agent_task, NULL);
-    if (self->pipe) {
-        char *status = zstr_recv (self->pipe);
-        if (strneq (status, "OK"))
-            zauth_destroy (&self);
-        zstr_free (&status);
-    }
-    else {
+    assert (self->pipe);
+    char *status = zstr_recv (self->pipe);
+    if (strneq (status, "OK"))
         zauth_destroy (&self);
-    }
+
+    zstr_free (&status);
     return self;
 }
 
@@ -455,66 +451,65 @@ static int
 s_agent_authenticate (agent_t *self)
 {
     zap_request_t *request = zap_request_new (self->handler);
-    if (request) {
-        //  Is address explicitly whitelisted or blacklisted?
-        bool allowed = false;
-        bool denied = false;
+    if (!request)
+        return 0;           //  Interrupted, no request to process
 
-        if (zhash_size (self->whitelist)) {
-            if (zhash_lookup (self->whitelist, request->address)) {
-                allowed = true;
-                if (self->verbose)
-                    printf ("ZAUTH I: PASSED (whitelist) address=%s\n", request->address);
-            }
-            else {
-                denied = true;
-                if (self->verbose)
-                    printf ("ZAUTH I: DENIED (not in whitelist) address=%s\n", request->address);
-            }
-        }
-        else
-        if (zhash_size (self->blacklist)) {
-            if (zhash_lookup (self->blacklist, request->address)) {
-                denied = true;
-                if (self->verbose)
-                    printf ("ZAUTH I: DENIED (blacklist) address=%s\n", request->address);
-            }
-            else {
-                allowed = true;
-                if (self->verbose)
-                    printf ("ZAUTH I: PASSED (not in blacklist) address=%s\n", request->address);
-            }
-        }
-        //  Mechanism-specific checks
-        if (!denied) {
-            if (streq (request->mechanism, "NULL") && !allowed) {
-                //  For NULL, we allow if the address wasn't blacklisted
-                if (self->verbose)
-                    printf ("ZAUTH I: ALLOWED (NULL)\n");
-                allowed = true;
-            }
-            else
-            if (streq (request->mechanism, "PLAIN"))
-                //  For PLAIN, even a whitelisted address must authenticate
-                allowed = s_authenticate_plain (self, request);
-            else
-            if (streq (request->mechanism, "CURVE"))
-                //  For CURVE, even a whitelisted address must authenticate
-                allowed = s_authenticate_curve (self, request);
-            else
-            if (streq (request->mechanism, "GSSAPI"))
-                //  For GSSAPI, even a whitelisted address must authenticate
-                allowed = s_authenticate_gssapi (self, request);
-        }
-        if (allowed)
-            zap_request_reply (request, "200", "OK");
-        else
-            zap_request_reply (request, "400", "NO ACCESS");
+    //  Is address explicitly whitelisted or blacklisted?
+    bool allowed = false;
+    bool denied = false;
 
-        zap_request_destroy (&request);
+    if (zhash_size (self->whitelist)) {
+        if (zhash_lookup (self->whitelist, request->address)) {
+            allowed = true;
+            if (self->verbose)
+                printf ("ZAUTH I: PASSED (whitelist) address=%s\n", request->address);
+        }
+        else {
+            denied = true;
+            if (self->verbose)
+                printf ("ZAUTH I: DENIED (not in whitelist) address=%s\n", request->address);
+        }
     }
     else
-        zap_request_reply (request, "500", "Internal error");
+    if (zhash_size (self->blacklist)) {
+        if (zhash_lookup (self->blacklist, request->address)) {
+            denied = true;
+            if (self->verbose)
+                printf ("ZAUTH I: DENIED (blacklist) address=%s\n", request->address);
+        }
+        else {
+            allowed = true;
+            if (self->verbose)
+                printf ("ZAUTH I: PASSED (not in blacklist) address=%s\n", request->address);
+        }
+    }
+    //  Mechanism-specific checks
+    if (!denied) {
+        if (streq (request->mechanism, "NULL") && !allowed) {
+            //  For NULL, we allow if the address wasn't blacklisted
+            if (self->verbose)
+                printf ("ZAUTH I: ALLOWED (NULL)\n");
+            allowed = true;
+        }
+        else
+        if (streq (request->mechanism, "PLAIN"))
+            //  For PLAIN, even a whitelisted address must authenticate
+            allowed = s_authenticate_plain (self, request);
+        else
+        if (streq (request->mechanism, "CURVE"))
+            //  For CURVE, even a whitelisted address must authenticate
+            allowed = s_authenticate_curve (self, request);
+        else
+        if (streq (request->mechanism, "GSSAPI"))
+            //  For GSSAPI, even a whitelisted address must authenticate
+            allowed = s_authenticate_gssapi (self, request);
+    }
+    if (allowed)
+        zap_request_reply (request, "200", "OK");
+    else
+        zap_request_reply (request, "400", "NO ACCESS");
+
+    zap_request_destroy (&request);
     return 0;
 }
 
@@ -615,9 +610,19 @@ s_can_connect (zctx_t *ctx, void **server, void **client)
     assert (port_nbr > 0);
     int rc = zsocket_connect (*client, "tcp://127.0.0.1:%d", port_nbr);
     assert (rc == 0);
+    //  Give the connection time to fail if that's the plan
+    zclock_sleep (200);
+
+    //  By default PUSH sockets block if there's no peer
+    zsock_set_sndtimeo (*server, 200);
     zstr_send (*server, "Hello, World");
+    if (zsock_mechanism (*client) == ZMQ_CURVE)
+        zclock_sleep (1500);
+    else
+        zclock_sleep (200);
+
     zpoller_t *poller = zpoller_new (*client, NULL);
-    bool success = (zpoller_wait (poller, 200) == *client);
+    bool success = (zpoller_wait (poller, 400) == *client);
     zpoller_destroy (&poller);
     zsocket_destroy (ctx, *client);
     zsocket_destroy (ctx, *server);
@@ -713,7 +718,7 @@ zauth_v2_test (bool verbose)
         assert (server_cert);
         zcert_t *client_cert = zcert_new ();
         assert (client_cert);
-        char *server_key = zcert_public_txt (server_cert);
+        const char *server_key = zcert_public_txt (server_cert);
 
         //  Test without setting-up any authentication
         zcert_apply (server_cert, server);

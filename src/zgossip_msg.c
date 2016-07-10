@@ -12,14 +12,13 @@
      * The XML model used for this code generation: zgossip_msg.xml, or
      * The code generation script that built this file: zproto_codec_c
     ************************************************************************
-    Copyright (c) 1991-2012 iMatix Corporation -- http://www.imatix.com                
-    Copyright other contributors as noted in the AUTHORS file.                         
-                                                                                       
-    This file is part of CZMQ, the high-level C binding for 0MQ: http://czmq.zeromq.org
-                                                                                       
-    This Source Code Form is subject to the terms of the Mozilla Public                
-    License, v. 2.0. If a copy of the MPL was not distributed with this                
-    file, You can obtain one at http://mozilla.org/MPL/2.0/.                           
+    Copyright (c) the Contributors as noted in the AUTHORS file.       
+    This file is part of CZMQ, the high-level C binding for 0MQ:       
+    http://czmq.zeromq.org.                                            
+                                                                       
+    This Source Code Form is subject to the terms of the Mozilla Public
+    License, v. 2.0. If a copy of the MPL was not distributed with this
+    file, You can obtain one at http://mozilla.org/MPL/2.0/.           
     =========================================================================
 */
 
@@ -30,7 +29,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 #include "./zgossip_msg.h"
 
 //  Structure of our class
@@ -66,7 +65,7 @@ struct _zgossip_msg_t {
 
 //  Put a 1-byte number to the frame
 #define PUT_NUMBER1(host) { \
-    *(byte *) self->needle = (host); \
+    *(byte *) self->needle = (byte) (host); \
     self->needle++; \
 }
 

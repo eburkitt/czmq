@@ -1,4 +1,4 @@
-#### ziflist - List of network interfaces available on system
+#### ziflist - list of network interfaces available on system
 
 The ziflist class takes a snapshot of the network interfaces that the
 system currently supports (this can change arbitrarily, especially on
@@ -10,17 +10,16 @@ Please add @discuss section in ../src/ziflist.c.
 
 This is the class interface:
 
+```h
+    //  This is a stable class, and may not change except for emergencies. It
+    //  is provided in stable builds.
     //  Get a list of network interfaces currently defined on the system
     CZMQ_EXPORT ziflist_t *
-        ziflist_new ();
+        ziflist_new (void);
     
     //  Destroy a ziflist instance
     CZMQ_EXPORT void
         ziflist_destroy (ziflist_t **self_p);
-    
-    //  Print properties of the ziflist object.
-    CZMQ_EXPORT void
-        ziflist_print (ziflist_t *self);
     
     //  Reload network interfaces from system
     CZMQ_EXPORT void
@@ -50,19 +49,26 @@ This is the class interface:
     CZMQ_EXPORT const char *
         ziflist_netmask (ziflist_t *self);
     
+    //  Return the list of interfaces.
+    CZMQ_EXPORT void
+        ziflist_print (ziflist_t *self);
+    
     //  Self test of this class.
     CZMQ_EXPORT void
         ziflist_test (bool verbose);
+    
+```
 
 This is the class self test code:
 
+```c
     ziflist_t *iflist = ziflist_new ();
     assert (iflist);
     
     size_t items = ziflist_size (iflist);
     
     if (verbose) {
-    //        printf ("ziflist: interfaces=%zu\n", ziflist_size (iflist));
+        printf ("ziflist: interfaces=%zu\n", ziflist_size (iflist));
         const char *name = ziflist_first (iflist);
         while (name) {
             printf (" - name=%s address=%s netmask=%s broadcast=%s\n",
@@ -73,4 +79,5 @@ This is the class self test code:
     ziflist_reload (iflist);
     assert (items == ziflist_size (iflist));
     ziflist_destroy (&iflist);
+```
 

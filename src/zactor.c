@@ -31,7 +31,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  zactor_t instances always have this tag as the first 4 octets of
 //  their data, which lets us do runtime object typing & validation.
@@ -97,24 +97,16 @@ s_thread_shim (void *args)
 //  Create a new actor.
 
 zactor_t *
-zactor_new (zactor_fn *actor, void *args)
+zactor_new (zactor_fn actor, void *args)
 {
     zactor_t *self = (zactor_t *) zmalloc (sizeof (zactor_t));
-    if (!self)
-        return NULL;
+    assert (self);
     self->tag = ZACTOR_TAG;
 
     shim_t *shim = (shim_t *) zmalloc (sizeof (shim_t));
-    if (!shim) {
-        zactor_destroy (&self);
-        return NULL;
-    }
+    assert (shim);
     shim->pipe = zsys_create_pipe (&self->pipe);
-    if (!shim->pipe) {
-        free (shim);
-        zactor_destroy (&self);
-        return NULL;
-    }
+    assert (shim->pipe);
     shim->handler = actor;
     shim->args = args;
 

@@ -29,7 +29,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -64,51 +64,42 @@ zfile_t *
 zfile_new (const char *path, const char *name)
 {
     zfile_t *self = (zfile_t *) zmalloc (sizeof (zfile_t));
+    assert (self);
 
-    if (self) {
-        //  Format full path to file
-        if (path) {
-            self->fullname = (char *) zmalloc (strlen (path) + strlen (name) + 2);
-            if (self->fullname)
-                sprintf (self->fullname, "%s/%s", path, name);
-            else {
-                zfile_destroy (&self);
-                return NULL;
-            }
-        }
-        else
-            self->fullname = strdup (name);
+    //  Format full path to file
+    if (path) {
+        self->fullname = (char *) zmalloc (strlen (path) + strlen (name) + 2);
+        assert (self->fullname);
+        sprintf (self->fullname, "%s/%s", path, name);
+    }
+    else
+        self->fullname = strdup (name);
 
-        if (self->fullname) {
-            //  Resolve symbolic link if possible
-            if (strlen (self->fullname) > 3
-            &&  streq (self->fullname + strlen (self->fullname) - 3, ".ln")) {
-                FILE *handle = fopen (self->fullname, "r");
-                if (handle) {
-                    char buffer [256];
-                    if (fgets (buffer, 256, handle)) {
-                        //  We have the contents of the symbolic link
-                        if (buffer [strlen (buffer) - 1] == '\n')
-                            buffer [strlen (buffer) - 1] = 0;
-                        self->link = strdup (buffer);
-                        
-                        //  Chop ".ln" off name for external use
-                        if (self->link)
-                            self->fullname [strlen (self->fullname) - 3] = 0;
-                        else {
-                            fclose (handle);
-                            zfile_destroy (&self);
-                            return NULL;
-                        }
-                    }
+    //  Resolve symbolic link if possible
+    if (strlen (self->fullname) > 3
+    &&  streq (self->fullname + strlen (self->fullname) - 3, ".ln")) {
+        FILE *handle = fopen (self->fullname, "r");
+        if (handle) {
+            char buffer [256];
+            if (fgets (buffer, 256, handle)) {
+                //  We have the contents of the symbolic link
+                if (buffer [strlen (buffer) - 1] == '\n')
+                    buffer [strlen (buffer) - 1] = 0;
+                self->link = strdup (buffer);
+
+                //  Chop ".ln" off name for external use
+                if (self->link)
+                    self->fullname [strlen (self->fullname) - 3] = 0;
+                else {
                     fclose (handle);
+                    zfile_destroy (&self);
+                    return NULL;
                 }
             }
-            zfile_restat (self);
+            fclose (handle);
         }
-        else
-            zfile_destroy (&self);
     }
+    zfile_restat (self);
     return self;
 }
 
@@ -143,16 +134,13 @@ zfile_dup (zfile_t *self)
 {
     if (self) {
         zfile_t *copy = (zfile_t *) zmalloc (sizeof (zfile_t));
-        if (copy)
-            copy->fullname = strdup (self->fullname);
-        if (copy->fullname) {
-            copy->modified = self->modified;
-            copy->cursize = self->cursize;
-            copy->link = self->link? strdup (self->link): NULL;
-            copy->mode = self->mode;
-        }
-        else
-            zfile_destroy (&copy);
+        assert (copy);
+        copy->fullname = strdup (self->fullname);
+        assert (copy->fullname);
+        copy->modified = self->modified;
+        copy->cursize = self->cursize;
+        copy->link = self->link? strdup (self->link): NULL;
+        copy->mode = self->mode;
         return copy;
     }
     else
@@ -403,22 +391,26 @@ zfile_read (zfile_t *self, size_t bytes, off_t offset)
 {
     assert (self);
     assert (self->handle);
-    
-    //  Calculate real number of bytes to read
-    if (offset > self->cursize)
-        bytes = 0;
-    else
-    if (bytes > (size_t) (self->cursize - offset))
-        bytes = (size_t) (self->cursize - offset);
-
-    if (fseek (self->handle, (long) offset, SEEK_SET) == -1)
-        return NULL;
 
     self->eof = false;
-    zchunk_t *chunk = zchunk_read (self->handle, bytes);
-    if (chunk)
-        self->eof = zchunk_size (chunk) < bytes;
-    return chunk;
+    //  Calculate real number of bytes to read
+    if (offset > self->cursize) {
+        // if we tried to read 'after' the cursise, then we are at the end
+        bytes = 0;
+        self->eof = true;
+    }
+    else
+    if (bytes > (size_t) (self->cursize - offset)) {
+        // if we are trying to read more than there is, we are at the end
+        self->eof = true;
+        bytes = (size_t) (self->cursize - offset);
+    }
+
+    if (fseek (self->handle, (long) offset, SEEK_SET) == -1) {
+        return NULL;
+    }
+
+    return zchunk_read (self->handle, bytes);
 }
 
 
@@ -464,6 +456,7 @@ zfile_readln (zfile_t *self)
     if (!self->curline) {
         self->linemax = 512; 
         self->curline = (char *) malloc (self->linemax);
+        assert (self->curline);
     }
     uint char_nbr = 0;
     while (true) {
@@ -527,7 +520,7 @@ zfile_digest (zfile_t *self)
             return NULL;            //  Problem reading file
 
         //  Now calculate hash for file data, chunk by chunk
-        size_t blocksz = 65535;
+        long blocksz = 65535;
         off_t offset = 0;
 
         self->digest = zdigest_new ();
@@ -544,8 +537,8 @@ zfile_digest (zfile_t *self)
             if (blocksz > LONG_MAX - offset)
                 return NULL;
 
-            offset += (off_t) blocksz;
-            chunk = zfile_read (self, blocksz, offset);
+            offset += blocksz;
+            chunk = zfile_read (self, (size_t) blocksz, offset);
         }
         zchunk_destroy (&chunk);
         fclose (self->handle);
@@ -707,7 +700,45 @@ zfile_test (bool verbose)
     rc = zfile_input (file);
     assert (rc == -1);
     zfile_destroy (&file);
+
+    file = zfile_new ("./", "eof_checkfile");
+    assert (file);
+    //  1. Write something first
+    rc = zfile_output (file);
+    assert (rc == 0);
+    chunk = zchunk_new ("123456789", 9);
+    assert (chunk);
+
+    rc = zfile_write (file, chunk, 0);
+    assert (rc == 0);
+    zchunk_destroy (&chunk);
+    zfile_close (file);
+    assert (zfile_cursize (file) == 9);
+
+    // 2. Read the written something
+    rc = zfile_input (file);
+    assert (rc != -1);
+    // try to read more bytes than there is in the file
+    chunk = zfile_read (file, 1000, 0);
+    assert (zfile_eof(file));
+    assert (zchunk_streq (chunk, "123456789"));
+    zchunk_destroy (&chunk);
+
+    // reading is ok
+    chunk = zfile_read (file, 5, 0);
+    assert (!zfile_eof(file));
+    assert (zchunk_streq (chunk, "12345"));
+    zchunk_destroy (&chunk);
+
+    // read from non zero offset until the end
+    chunk = zfile_read (file, 5, 5);
+    assert (zfile_eof(file));
+    assert (zchunk_streq (chunk, "6789"));
+    zchunk_destroy (&chunk);
+    zfile_remove (file);
     //  @end
+    zfile_close (file);
+    zfile_destroy (&file);
 
     printf ("OK\n");
 }

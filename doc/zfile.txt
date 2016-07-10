@@ -8,6 +8,8 @@ zfile - provides methods to work with files in a portable fashion.
 SYNOPSIS
 --------
 ----
+//  This is a stable class, and may not change except for emergencies. It
+//  is provided in stable builds.
 //  If file exists, populates properties. CZMQ supports portable symbolic
 //  links, which are files with the extension ".ln". A symbolic link is a
 //  text file containing one line, the filename of a target file. Reading
@@ -22,7 +24,7 @@ CZMQ_EXPORT void
 
 //  Duplicate a file item, returns a newly constructed item. If the file
 //  is null, or memory was exhausted, returns null.                     
-//  The caller is responsible for destroying the return value when finished with it.
+//  Caller owns return value and must destroy it when done.
 CZMQ_EXPORT zfile_t *
     zfile_dup (zfile_t *self);
 
@@ -95,7 +97,7 @@ CZMQ_EXPORT int
 
 //  Read chunk from file at specified position. If this was the last chunk,
 //  sets the eof property. Returns a null chunk in case of error.          
-//  The caller is responsible for destroying the return value when finished with it.
+//  Caller owns return value and must destroy it when done.
 CZMQ_EXPORT zchunk_t *
     zfile_read (zfile_t *self, size_t bytes, off_t offset);
 
@@ -128,6 +130,7 @@ CZMQ_EXPORT const char *
 //  Self test of this class.
 CZMQ_EXPORT void
     zfile_test (bool verbose);
+
 //  These methods are deprecated, and now moved to zsys class.
 CZMQ_EXPORT bool
     zfile_exists (const char *filename);
@@ -261,4 +264,40 @@ assert (!zfile_is_readable (file));
 rc = zfile_input (file);
 assert (rc == -1);
 zfile_destroy (&file);
+
+file = zfile_new ("./", "eof_checkfile");
+assert (file);
+//  1. Write something first
+rc = zfile_output (file);
+assert (rc == 0);
+chunk = zchunk_new ("123456789", 9);
+assert (chunk);
+
+rc = zfile_write (file, chunk, 0);
+assert (rc == 0);
+zchunk_destroy (&chunk);
+zfile_close (file);
+assert (zfile_cursize (file) == 9);
+
+// 2. Read the written something
+rc = zfile_input (file);
+assert (rc != -1);
+// try to read more bytes than there is in the file
+chunk = zfile_read (file, 1000, 0);
+assert (zfile_eof(file));
+assert (zchunk_streq (chunk, "123456789"));
+zchunk_destroy (&chunk);
+
+// reading is ok
+chunk = zfile_read (file, 5, 0);
+assert (!zfile_eof(file));
+assert (zchunk_streq (chunk, "12345"));
+zchunk_destroy (&chunk);
+
+// read from non zero offset until the end
+chunk = zfile_read (file, 5, 5);
+assert (zfile_eof(file));
+assert (zchunk_streq (chunk, "6789"));
+zchunk_destroy (&chunk);
+zfile_remove (file);
 ----

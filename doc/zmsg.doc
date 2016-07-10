@@ -9,21 +9,42 @@ Please add @discuss section in ../src/zmsg.c.
 
 This is the class interface:
 
+```h
+    //  This is a stable class, and may not change except for emergencies. It
+    //  is provided in stable builds.
+    //  This class has draft methods, which may change over time. They are not
+    //  in stable releases, by default. Use --enable-drafts to enable.
     //  Create a new empty message object
     CZMQ_EXPORT zmsg_t *
-        zmsg_new ();
-    
-    //  Destroy a message object and all frames it contains
-    CZMQ_EXPORT void
-        zmsg_destroy (zmsg_t **self_p);
+        zmsg_new (void);
     
     //  Receive message from socket, returns zmsg_t object or NULL if the recv   
     //  was interrupted. Does a blocking recv. If you want to not block then use 
     //  the zloop class or zmsg_recv_nowait or zmq_poll to check for socket input
     //  before receiving.                                                        
-    //  The caller is responsible for destroying the return value when finished with it.
     CZMQ_EXPORT zmsg_t *
         zmsg_recv (void *source);
+    
+    //  Load/append an open file into new message, return the message.
+    //  Returns NULL if the message could not be loaded.              
+    CZMQ_EXPORT zmsg_t *
+        zmsg_load (FILE *file);
+    
+    //  Decodes a serialized message frame created by zmsg_encode () and returns
+    //  a new zmsg_t object. Returns NULL if the frame was badly formatted or   
+    //  there was insufficient memory to work.                                  
+    CZMQ_EXPORT zmsg_t *
+        zmsg_decode (zframe_t *frame);
+    
+    //  Generate a signal message encoding the given status. A signal is a short
+    //  message carrying a 1-byte success/failure code (by convention, 0 means  
+    //  OK). Signals are encoded to be distinguishable from "normal" messages.  
+    CZMQ_EXPORT zmsg_t *
+        zmsg_new_signal (byte status);
+    
+    //  Destroy a message object and all frames it contains
+    CZMQ_EXPORT void
+        zmsg_destroy (zmsg_t **self_p);
     
     //  Send message to destination socket, and destroy the message after sending
     //  it successfully. If the message has no frames, sends nothing but destroys
@@ -64,19 +85,19 @@ This is the class interface:
         zmsg_append (zmsg_t *self, zframe_t **frame_p);
     
     //  Remove first frame from message, if any. Returns frame, or NULL.
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT zframe_t *
         zmsg_pop (zmsg_t *self);
     
     //  Push block of memory to front of message, as a new frame.
     //  Returns 0 on success, -1 on error.                       
     CZMQ_EXPORT int
-        zmsg_pushmem (zmsg_t *self, const void *src, size_t size);
+        zmsg_pushmem (zmsg_t *self, const void *data, size_t size);
     
     //  Add block of memory to the end of the message, as a new frame.
     //  Returns 0 on success, -1 on error.                            
     CZMQ_EXPORT int
-        zmsg_addmem (zmsg_t *self, const void *src, size_t size);
+        zmsg_addmem (zmsg_t *self, const void *data, size_t size);
     
     //  Push string as new frame to front of message.
     //  Returns 0 on success, -1 on error.           
@@ -91,16 +112,16 @@ This is the class interface:
     //  Push formatted string as new frame to front of message.
     //  Returns 0 on success, -1 on error.                     
     CZMQ_EXPORT int
-        zmsg_pushstrf (zmsg_t *self, const char *format, ...) CHECK_PRINTF (2);
+        zmsg_pushstrf (zmsg_t *self, const char *format, ...);
     
     //  Push formatted string as new frame to end of message.
     //  Returns 0 on success, -1 on error.                   
     CZMQ_EXPORT int
-        zmsg_addstrf (zmsg_t *self, const char *format, ...) CHECK_PRINTF (2);
+        zmsg_addstrf (zmsg_t *self, const char *format, ...);
     
     //  Pop frame off front of message, return as fresh string. If there were
     //  no more frames in the message, returns NULL.                         
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT char *
         zmsg_popstr (zmsg_t *self);
     
@@ -111,8 +132,8 @@ This is the class interface:
         zmsg_addmsg (zmsg_t *self, zmsg_t **msg_p);
     
     //  Remove first submessage from message, if any. Returns zmsg_t, or NULL if
-    //  decoding was not succesfull.                                            
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  decoding was not successful.                                            
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT zmsg_t *
         zmsg_popmsg (zmsg_t *self);
     
@@ -120,8 +141,8 @@ This is the class interface:
     CZMQ_EXPORT void
         zmsg_remove (zmsg_t *self, zframe_t *frame);
     
-    //  Set cursor to first frame in message. Returns frame, or NULL, if the 
-    //  message is empty. Use this to navigate the frames as a list.         
+    //  Set cursor to first frame in message. Returns frame, or NULL, if the
+    //  message is empty. Use this to navigate the frames as a list.        
     CZMQ_EXPORT zframe_t *
         zmsg_first (zmsg_t *self);
     
@@ -142,30 +163,18 @@ This is the class interface:
     CZMQ_EXPORT int
         zmsg_save (zmsg_t *self, FILE *file);
     
-    //  Load/append an open file into message, create new message if 
-    //  null message provided. Returns NULL if the message could not 
-    //  be loaded.                                                   
-    //  The caller is responsible for destroying the return value when finished with it.
-    CZMQ_EXPORT zmsg_t *
-        zmsg_load (zmsg_t *self, FILE *file);
-    
-    //  Serialize multipart message to a single buffer. Use this method to send  
-    //  structured messages across transports that do not support multipart data.
-    //  Allocates and returns a new buffer containing the serialized message.    
-    //  To decode a serialized message buffer, use zmsg_decode ().               
-    CZMQ_EXPORT size_t
-        zmsg_encode (zmsg_t *self, byte **buffer);
-    
-    //  Decodes a serialized message buffer created by zmsg_encode () and returns
-    //  a new zmsg_t object. Returns NULL if the buffer was badly formatted or   
-    //  there was insufficient memory to work.                                   
-    //  The caller is responsible for destroying the return value when finished with it.
-    CZMQ_EXPORT zmsg_t *
-        zmsg_decode (const byte *buffer, size_t buffer_size);
+    //  Serialize multipart message to a single message frame. Use this method
+    //  to send structured messages across transports that do not support     
+    //  multipart data. Allocates and returns a new frame containing the      
+    //  serialized message. To decode a serialized message frame, use         
+    //  zmsg_decode ().                                                       
+    //  Caller owns return value and must destroy it when done.
+    CZMQ_EXPORT zframe_t *
+        zmsg_encode (zmsg_t *self);
     
     //  Create copy of message, as new message object. Returns a fresh zmsg_t
     //  object. If message is null, or memory was exhausted, returns null.   
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT zmsg_t *
         zmsg_dup (zmsg_t *self);
     
@@ -180,13 +189,6 @@ This is the class interface:
     CZMQ_EXPORT bool
         zmsg_eq (zmsg_t *self, zmsg_t *other);
     
-    //  Generate a signal message encoding the given status. A signal is a short
-    //  message carrying a 1-byte success/failure code (by convention, 0 means  
-    //  OK). Signals are encoded to be distinguishable from "normal" messages.  
-    //  The caller is responsible for destroying the return value when finished with it.
-    CZMQ_EXPORT zmsg_t *
-        zmsg_new_signal (byte status);
-    
     //  Return signal value, 0 or greater, if message is a signal, -1 if not.
     CZMQ_EXPORT int
         zmsg_signal (zmsg_t *self);
@@ -195,12 +197,29 @@ This is the class interface:
     CZMQ_EXPORT bool
         zmsg_is (void *self);
     
-    //  Self test of this class
+    //  Self test of this class.
     CZMQ_EXPORT void
         zmsg_test (bool verbose);
+    
+    #ifdef CZMQ_BUILD_DRAFT_API
+    //  *** Draft method, for development use, may change without warning ***
+    //  Return message routing ID, if the message came from a ZMQ_SERVER socket.
+    //  Else returns zero.                                                      
+    CZMQ_EXPORT uint32_t
+        zmsg_routing_id (zmsg_t *self);
+    
+    //  *** Draft method, for development use, may change without warning ***
+    //  Set routing ID on message. This is used if/when the message is sent to a
+    //  ZMQ_SERVER socket.                                                      
+    CZMQ_EXPORT void
+        zmsg_set_routing_id (zmsg_t *self, uint32_t routing_id);
+    
+    #endif // CZMQ_BUILD_DRAFT_API
+```
 
 This is the class self test code:
 
+```c
     //  Create two PAIR sockets and connect over inproc
     zsock_t *output = zsock_new_pair ("@inproc://zmsg.test");
     assert (output);
@@ -266,19 +285,8 @@ This is the class self test code:
     assert (zmsg_size (msg) == 10);
     assert (zmsg_content_size (msg) == 60);
     
-    // create empty file for null test
-    FILE *file = fopen ("zmsg.test", "w");
-    assert (file);
-    fclose (file);
-    
-    file = fopen ("zmsg.test", "r");
-    zmsg_t *null_msg = zmsg_load (NULL, file);
-    assert (null_msg == NULL);
-    fclose (file);
-    remove ("zmsg.test");
-    
     //  Save to a file, read back
-    file = fopen ("zmsg.test", "w");
+    FILE *file = fopen ("zmsg.test", "w");
     assert (file);
     rc = zmsg_save (msg, file);
     assert (rc == 0);
@@ -291,7 +299,7 @@ This is the class self test code:
     zmsg_destroy (&msg);
     
     file = fopen ("zmsg.test", "r");
-    msg = zmsg_load (NULL, file);
+    msg = zmsg_load (file);
     assert (msg);
     fclose (file);
     remove ("zmsg.test");
@@ -351,13 +359,12 @@ This is the class self test code:
     assert (rc == 0);
     free (blank);
     assert (zmsg_size (msg) == 9);
-    byte *buffer;
-    size_t buffer_size = zmsg_encode (msg, &buffer);
+    frame = zmsg_encode (msg);
     zmsg_destroy (&msg);
-    msg = zmsg_decode (buffer, buffer_size);
+    msg = zmsg_decode (frame);
     assert (msg);
-    free (buffer);
     zmsg_destroy (&msg);
+    zframe_destroy (&frame);
     
     //  Test submessages
     msg = zmsg_new ();
@@ -428,4 +435,59 @@ This is the class self test code:
     zsock_destroy (&input);
     zsock_destroy (&output);
     
+    #if defined (ZMQ_SERVER)
+    //  Create server and client sockets and connect over inproc
+    zsock_t *server = zsock_new_server ("inproc://zmsg-test-routing");
+    assert (server);
+    zsock_t *client = zsock_new_client ("inproc://zmsg-test-routing");
+    assert (client);
+    
+    //  Send request from client to server
+    zmsg_t *request = zmsg_new ();
+    assert (request);
+    zmsg_addstr (request, "Hello");
+    rc = zmsg_send (&request, client);
+    assert (rc == 0);
+    assert (!request);
+    
+    //  Read request and send reply
+    request = zmsg_recv (server);
+    assert (request);
+    char *string = zmsg_popstr (request);
+    assert (streq (string, "Hello"));
+    assert (zmsg_routing_id (request));
+    zstr_free (&string);
+    
+    zmsg_t *reply = zmsg_new ();
+    assert (reply);
+    zmsg_addstr (reply, "World");
+    zmsg_set_routing_id (reply, zmsg_routing_id (request));
+    rc = zmsg_send (&reply, server);
+    assert (rc == 0);
+    zmsg_destroy (&request);
+    
+    //  Read reply
+    reply = zmsg_recv (client);
+    string = zmsg_popstr (reply);
+    assert (streq (string, "World"));
+    assert (zmsg_routing_id (reply) == 0);
+    zmsg_destroy (&reply);
+    zstr_free (&string);
+    
+    //  Client and server disallow multipart
+    msg = zmsg_new ();
+    zmsg_addstr (msg, "One");
+    zmsg_addstr (msg, "Two");
+    rc = zmsg_send (&msg, client);
+    assert (rc == -1);
+    assert (zmsg_size (msg) == 2);
+    rc = zmsg_send (&msg, server);
+    assert (rc == -1);
+    assert (zmsg_size (msg) == 2);
+    zmsg_destroy (&msg);
+    
+    zsock_destroy (&client);
+    zsock_destroy (&server);
+    #endif
+```
 

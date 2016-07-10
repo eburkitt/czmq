@@ -24,7 +24,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 #define NODE_TAG            0x0006cafe
 
@@ -45,26 +45,25 @@ struct _zlistx_t {
     node_t *head;                   //  First item in list, if any
     node_t *cursor;                 //  Current cursors for iteration
     size_t size;                    //  Number of items in list
-    czmq_duplicator *duplicator;    //  Item duplicator, if any
-    czmq_comparator *comparator;    //  Item comparator, if any
-    czmq_destructor *destructor;    //  Item destructor, if any
+    //  Function callbacks for duplicating and destroying items, if any
+    zlistx_duplicator_fn *duplicator;
+    zlistx_destructor_fn *destructor;
+    zlistx_comparator_fn *comparator;
 };
 
 
 //  Initialize a list node and attach to the prev and next nodes, or itself
-//  if these are specified as null. Returns new node, or NULL if there was
-//  no more heap memory.
+//  if these are specified as null. Returns new node.
 
 static node_t *
 s_node_new (void *item)
 {
     node_t *self = (node_t *) zmalloc (sizeof (node_t));
-    if (self) {
-        self->tag = NODE_TAG;
-        self->prev = self;
-        self->next = self;
-        self->item = item;
-    }
+    assert (self);
+    self->tag = NODE_TAG;
+    self->prev = self;
+    self->next = self;
+    self->item = item;
     return self;
 }
 
@@ -108,16 +107,11 @@ zlistx_t *
 zlistx_new (void)
 {
     zlistx_t *self = (zlistx_t *) zmalloc (sizeof (zlistx_t));
-    if (self) {
-        self->head = s_node_new (NULL);
-        if (self->head) {
-            self->cursor = self->head;
-            self->comparator = s_comparator;
-        }
-        else
-            zlistx_destroy (&self);
-
-    }
+    assert (self);
+    self->head = s_node_new (NULL);
+    assert (self->head);
+    self->cursor = self->head;
+    self->comparator = s_comparator;
     return self;
 }
 
@@ -143,7 +137,7 @@ zlistx_destroy (zlistx_t **self_p)
 //  --------------------------------------------------------------------------
 //  Add an item to the head of the list. Calls the item duplicator, if any,
 //  on the item. Resets cursor to list head. Returns an item handle on
-//  success, NULL if memory was exhausted.
+//  success.
 
 void *
 zlistx_add_start (zlistx_t *self, void *item)
@@ -152,27 +146,24 @@ zlistx_add_start (zlistx_t *self, void *item)
     assert (item);
 
     if (self->duplicator) {
-        item = (self->duplicator)(item);
-        if (!item)
-            return NULL;        //  Out of memory
+        item = (self->duplicator) (item);
+        assert (item);
     }
     node_t *node = s_node_new (item);
-    if (node) {
-        //  Insert after head
-        s_node_relink (node, self->head, self->head->next);
-        self->cursor = self->head;
-        self->size++;
-        return node;
-    }
-    else
-        return NULL;            //  Out of memory
+    assert (node);
+
+    //  Insert after head
+    s_node_relink (node, self->head, self->head->next);
+    self->cursor = self->head;
+    self->size++;
+    return node;
 }
 
 
 //  --------------------------------------------------------------------------
 //  Add an item to the tail of the list. Calls the item duplicator, if any,
 //  on the item. Resets cursor to list head. Returns an item handle on
-//  success, NULL if memory was exhausted.
+//  success.
 
 void *
 zlistx_add_end (zlistx_t *self, void *item)
@@ -181,20 +172,17 @@ zlistx_add_end (zlistx_t *self, void *item)
     assert (item);
 
     if (self->duplicator) {
-        item = (self->duplicator)(item);
-        if (!item)
-            return NULL;        //  Out of memory
+        item = (self->duplicator) (item);
+        assert (item);
     }
     node_t *node = s_node_new (item);
-    if (node) {
-        //  Insert before head
-        s_node_relink (node, self->head->prev, self->head);
-        self->cursor = self->head;
-        self->size++;
-        return node;
-    }
-    else
-        return NULL;            //  Out of memory
+    assert (node);
+
+    //  Insert before head
+    s_node_relink (node, self->head->prev, self->head);
+    self->cursor = self->head;
+    self->size++;
+    return node;
 }
 
 
@@ -371,6 +359,7 @@ zlistx_detach (zlistx_t *self, void *handle)
         //  Reposition cursor so that delete/detach works during iteration
         if (self->cursor == node)
             self->cursor = self->cursor->prev;
+
         //  Remove node from list
         assert (node->tag == NODE_TAG);
         s_node_relink (node, node->prev, node->next);
@@ -528,16 +517,14 @@ zlistx_insert (zlistx_t *self, void *item, bool low_value)
 {
     assert (self);
     if (self->duplicator) {
-        item = (self->duplicator)(item);
-        if (!item)
-            return NULL;        //  Out of memory
+        item = (self->duplicator) (item);
+        assert (item);
     }
     node_t *node = s_node_new (item);
-    if (node) {
-        zlistx_reorder (self, node, low_value);
-        self->cursor = self->head;
-        self->size++;
-    }
+    assert (node);
+    zlistx_reorder (self, node, low_value);
+    self->cursor = self->head;
+    self->size++;
     return node;
 }
 
@@ -602,12 +589,8 @@ zlistx_dup (zlistx_t *self)
 
         //  Copy nodes
         node_t *node;
-        for (node = self->head->next; node != self->head; node = node->next) {
-            if (!zlistx_add_end (copy, node->item)) {
-                zlistx_destroy (&copy);
-                break;
-            }
-        }
+        for (node = self->head->next; node != self->head; node = node->next)
+            zlistx_add_end (copy, node->item);
     }
     return copy;
 }
@@ -618,7 +601,7 @@ zlistx_dup (zlistx_t *self)
 //  freed when the list is destroyed.
 
 void
-zlistx_set_destructor (zlistx_t *self, czmq_destructor destructor)
+zlistx_set_destructor (zlistx_t *self, zlistx_destructor_fn destructor)
 {
     assert (self);
     self->destructor = destructor;
@@ -630,7 +613,7 @@ zlistx_set_destructor (zlistx_t *self, czmq_destructor destructor)
 //  copied when the list is duplicated.
 
 void
-zlistx_set_duplicator (zlistx_t *self, czmq_duplicator duplicator)
+zlistx_set_duplicator (zlistx_t *self, zlistx_duplicator_fn duplicator)
 {
     assert (self);
     self->duplicator = duplicator;
@@ -643,7 +626,7 @@ zlistx_set_duplicator (zlistx_t *self, czmq_duplicator duplicator)
 //  or greater than, item2.
 
 void
-zlistx_set_comparator (zlistx_t *self, czmq_comparator comparator)
+zlistx_set_comparator (zlistx_t *self, zlistx_comparator_fn comparator)
 {
     assert (self);
     self->comparator = comparator;
@@ -677,9 +660,9 @@ zlistx_test (bool verbose)
     zlistx_sort (list);
 
     //  Use item handlers
-    zlistx_set_destructor (list, (czmq_destructor *) zstr_free);
-    zlistx_set_duplicator (list, (czmq_duplicator *) strdup);
-    zlistx_set_comparator (list, (czmq_comparator *) strcmp);
+    zlistx_set_destructor (list, (zlistx_destructor_fn *) zstr_free);
+    zlistx_set_duplicator (list, (zlistx_duplicator_fn *) strdup);
+    zlistx_set_comparator (list, (zlistx_comparator_fn *) strcmp);
 
     //  Try simple insert/sort/delete/next
     assert (zlistx_next (list) == NULL);

@@ -22,7 +22,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 #define ZAP_ENDPOINT  "inproc://zeromq.zap.01"
 
 //  --------------------------------------------------------------------------
@@ -62,26 +62,28 @@ s_self_destroy (self_t **self_p)
 }
 
 static self_t *
-s_self_new (zsock_t *pipe)
+s_self_new (zsock_t *pipe, zcertstore_t *certstore)
 {
     self_t *self = (self_t *) zmalloc (sizeof (self_t));
-    int rc = -1;
-    if (self) {
-        self->pipe = pipe;
-        self->whitelist = zhashx_new ();
-        if (self->whitelist)
-            self->blacklist = zhashx_new ();
-
-        //  Create ZAP handler and get ready for requests
-        if (self->blacklist)
-            self->handler = zsock_new (ZMQ_REP);
-        if (self->handler)
-            rc = zsock_bind (self->handler, ZAP_ENDPOINT);
-        if (rc == 0)
-            self->poller = zpoller_new (self->pipe, self->handler, NULL);
-        if (!self->poller)
-            s_self_destroy (&self);
+    assert (self);
+    if (certstore) {
+        self->certstore = certstore;
+        self->allow_any = false;
     }
+    self->pipe = pipe;
+    self->whitelist = zhashx_new ();
+    assert (self->whitelist);
+    self->blacklist = zhashx_new ();
+
+    //  Create ZAP handler and get ready for requests
+    assert (self->blacklist);
+    self->handler = zsock_new (ZMQ_REP);
+    assert (self->handler);
+    int rc = zsock_bind (self->handler, ZAP_ENDPOINT);
+    assert (rc == 0);
+    self->poller = zpoller_new (self->pipe, self->handler, NULL);
+    assert (self->poller);
+
     return self;
 }
 
@@ -276,21 +278,65 @@ s_zap_request_new (zsock_t *handler, bool verbose)
 //  Send a ZAP reply to the handler socket
 
 static int
-s_zap_request_reply (zap_request_t *self, char *status_code, char *status_text)
+s_zap_request_reply (zap_request_t *self, char *status_code, char *status_text, unsigned char *metadata, size_t metasize)
 {
     if (self->verbose)
         zsys_info ("zauth: - ZAP reply status_code=%s status_text=%s",
                    status_code, status_text);
 
-    zstr_sendx (self->handler,
-                "1.0", self->sequence, status_code, status_text, "", "",
-                NULL);
+    zmsg_t *msg = zmsg_new ();
+    int rc = zmsg_addstr(msg, "1.0");
+    assert (rc == 0);
+    rc = zmsg_addstr(msg, self->sequence);
+    assert (rc == 0);
+    rc = zmsg_addstr(msg, status_code);
+    assert (rc == 0);
+    rc = zmsg_addstr(msg, status_text);
+    assert (rc == 0);
+    rc = zmsg_addstr(msg, "");
+    assert (rc == 0);
+    rc = zmsg_addmem(msg, metadata, metasize);
+    assert (rc == 0);
+    rc = zmsg_send(&msg, self->handler);
+    assert (rc == 0);
+
     return 0;
 }
 
 
 //  --------------------------------------------------------------------------
 //  Handle an authentication request from libzmq core
+
+//  Helper for s_add_property
+//  THIS IS A COPY OF zmq::put_uint32 (<zmq>/src/wire.hpp)
+
+static void
+s_put_uint32 (unsigned char *buffer_, uint32_t value)
+{
+    buffer_ [0] = (unsigned char) (((value) >> 24) & 0xff);
+    buffer_ [1] = (unsigned char) (((value) >> 16) & 0xff);
+    buffer_ [2] = (unsigned char) (((value) >> 8) & 0xff);
+    buffer_ [3] = (unsigned char) (value & 0xff);
+}
+
+//  Add metadata property to ptr
+//  THIS IS AN ADAPTATION OF zmq::mechanism_t::add_property (<zmq>/src/mechanism.cpp)
+
+static size_t
+s_add_property (unsigned char *ptr, const char *name, const void *value, size_t value_len)
+{
+    const size_t name_len = strlen (name);
+    assert (name_len <= 255);
+    *ptr++ = (unsigned char) name_len;
+    memcpy (ptr, name, name_len);
+    ptr += name_len;
+    assert (value_len <= 0x7FFFFFFF);
+    s_put_uint32 (ptr, (uint32_t) value_len);
+    ptr += 4;
+    memcpy (ptr, value, value_len);
+
+    return 1 + name_len + 4 + value_len;
+}
 
 static bool
 s_authenticate_plain (self_t *self, zap_request_t *request)
@@ -320,26 +366,42 @@ s_authenticate_plain (self_t *self, zap_request_t *request)
 
 
 static bool
-s_authenticate_curve (self_t *self, zap_request_t *request)
+s_authenticate_curve (self_t *self, zap_request_t *request, unsigned char **metadata)
 {
-    //  TODO: load metadata from certificate and return via ZAP response
     if (self->allow_any) {
         if (self->verbose)
             zsys_info ("zauth: - allowed (CURVE allow any client)");
         return true;
     }
     else
-    if (self->certstore
-    &&  zcertstore_lookup (self->certstore, request->client_key)) {
-        if (self->verbose)
-            zsys_info ("zauth: - allowed (CURVE) client_key=%s", request->client_key);
-        return true;
+    if (self->certstore) {
+        zcert_t *cert = zcertstore_lookup (self->certstore, request->client_key);
+        if (cert != NULL) {
+            zlist_t *meta_k = zcert_meta_keys (cert);
+            while (true) {
+                void *key = zlist_next (meta_k);
+                if (key == NULL) {
+                    break;
+                }
+
+                const char *val = zcert_meta(cert, (const char *) key);
+                if (val == NULL) {
+                    break;
+                }
+
+                *metadata += s_add_property(*metadata, (const char *) key, val, strlen (val));
+            }
+            zlist_destroy (&meta_k);
+
+            if (self->verbose)
+                zsys_info ("zauth: - allowed (CURVE) client_key=%s", request->client_key);
+            return true;
+        }
     }
-    else {
-        if (self->verbose)
-            zsys_info ("zauth: - denied (CURVE) client_key=%s", request->client_key);
-        return false;
-    }
+
+    if (self->verbose)
+        zsys_info ("zauth: - denied (CURVE) client_key=%s", request->client_key);
+    return false;
 }
 
 static bool
@@ -356,67 +418,72 @@ static int
 s_self_authenticate (self_t *self)
 {
     zap_request_t *request = s_zap_request_new (self->handler, self->verbose);
-    if (request) {
-        //  Is address explicitly whitelisted or blacklisted?
-        bool allowed = false;
-        bool denied = false;
+    if (!request)
+        return 0;           //  Interrupted, no request to process
 
-        if (zhashx_size (self->whitelist)) {
-            if (zhashx_lookup (self->whitelist, request->address)) {
-                allowed = true;
-                if (self->verbose)
-                    zsys_info ("zauth: - passed (whitelist) address=%s", request->address);
-            }
-            else {
-                denied = true;
-                if (self->verbose)
-                    zsys_info ("zauth: - denied (not in whitelist) address=%s", request->address);
-            }
-        }
-        else
-        if (zhashx_size (self->blacklist)) {
-            if (zhashx_lookup (self->blacklist, request->address)) {
-                denied = true;
-                if (self->verbose)
-                    zsys_info ("zauth: - denied (blacklist) address=%s", request->address);
-            }
-            else {
-                allowed = true;
-                if (self->verbose)
-                    zsys_info ("zauth: - passed (not in blacklist) address=%s", request->address);
-            }
-        }
-        //  Mechanism-specific checks
-        if (!denied) {
-            if (streq (request->mechanism, "NULL") && !allowed) {
-                //  For NULL, we allow if the address wasn't blacklisted
-                if (self->verbose)
-                    zsys_info ("zauth: - allowed (NULL)");
-                allowed = true;
-            }
-            else
-            if (streq (request->mechanism, "PLAIN"))
-                //  For PLAIN, even a whitelisted address must authenticate
-                allowed = s_authenticate_plain (self, request);
-            else
-            if (streq (request->mechanism, "CURVE"))
-                //  For CURVE, even a whitelisted address must authenticate
-                allowed = s_authenticate_curve (self, request);
-            else
-            if (streq (request->mechanism, "GSSAPI"))
-                //  For GSSAPI, even a whitelisted address must authenticate
-                allowed = s_authenticate_gssapi (self, request);
-        }
-        if (allowed)
-            s_zap_request_reply (request, "200", "OK");
-        else
-            s_zap_request_reply (request, "400", "No access");
+    //  Is address explicitly whitelisted or blacklisted?
+    bool allowed = false;
+    bool denied = false;
 
-        s_zap_request_destroy (&request);
+    //  Curve certificate metadata
+    unsigned char * const metabuf = (unsigned char *) malloc (512);
+    assert (metabuf != NULL);
+    unsigned char *metadata = metabuf;
+
+    if (zhashx_size (self->whitelist)) {
+        if (zhashx_lookup (self->whitelist, request->address)) {
+            allowed = true;
+            if (self->verbose)
+                zsys_info ("zauth: - passed (whitelist) address=%s", request->address);
+        }
+        else {
+            denied = true;
+            if (self->verbose)
+                zsys_info ("zauth: - denied (not in whitelist) address=%s", request->address);
+        }
     }
     else
-        s_zap_request_reply (request, "500", "Internal error");
+    if (zhashx_size (self->blacklist)) {
+        if (zhashx_lookup (self->blacklist, request->address)) {
+            denied = true;
+            if (self->verbose)
+                zsys_info ("zauth: - denied (blacklist) address=%s", request->address);
+        }
+        else {
+            allowed = true;
+            if (self->verbose)
+                zsys_info ("zauth: - passed (not in blacklist) address=%s", request->address);
+        }
+    }
+    //  Mechanism-specific checks
+    if (!denied) {
+        if (streq (request->mechanism, "NULL") && !allowed) {
+            //  For NULL, we allow if the address wasn't blacklisted
+            if (self->verbose)
+                zsys_info ("zauth: - allowed (NULL)");
+            allowed = true;
+        }
+        else
+        if (streq (request->mechanism, "PLAIN"))
+            //  For PLAIN, even a whitelisted address must authenticate
+            allowed = s_authenticate_plain (self, request);
+        else
+        if (streq (request->mechanism, "CURVE"))
+            //  For CURVE, even a whitelisted address must authenticate
+            allowed = s_authenticate_curve (self, request, &metadata);
+        else
+        if (streq (request->mechanism, "GSSAPI"))
+            //  For GSSAPI, even a whitelisted address must authenticate
+            allowed = s_authenticate_gssapi (self, request);
+    }
+    if (allowed) {
+        size_t metasize = metadata - metabuf;
+        s_zap_request_reply (request, "200", "OK", metabuf, metasize);
+    } else
+        s_zap_request_reply (request, "400", "No access", (unsigned char *) "", 0);
 
+    s_zap_request_destroy (&request);
+    free (metabuf);
     return 0;
 }
 
@@ -425,11 +492,10 @@ s_self_authenticate (self_t *self)
 //  zauth() implements the zauth actor interface
 
 void
-zauth (zsock_t *pipe, void *unused)
+zauth (zsock_t *pipe, void *certstore)
 {
-    self_t *self = s_self_new (pipe);
-    if (!self)
-        return;
+    self_t *self = s_self_new (pipe, (zcertstore_t *)certstore);
+    assert (self);
 
     //  Signal successful initialization
     zsock_signal (pipe, 0);
@@ -453,27 +519,64 @@ zauth (zsock_t *pipe, void *unused)
 //  Selftest
 
 #if (ZMQ_VERSION_MAJOR == 4)
+//  Destroys old sockets and returns new ones
+static void
+s_renew_sockets (zsock_t **server, zsock_t **client)
+{
+    zsock_destroy (client);
+    zsock_destroy (server);
+    *server = zsock_new (ZMQ_PULL);
+    assert (*server);
+    *client = zsock_new (ZMQ_PUSH);
+    assert (*client);
+}
+
 //  Checks whether client can connect to server
 static bool
-s_can_connect (zsock_t **server, zsock_t **client)
+s_can_connect (zsock_t **server, zsock_t **client, bool renew)
 {
     int port_nbr = zsock_bind (*server, "tcp://127.0.0.1:*");
     assert (port_nbr > 0);
     int rc = zsock_connect (*client, "tcp://127.0.0.1:%d", port_nbr);
     assert (rc == 0);
+    //  Give the connection time to fail if that's the plan
+    if (zsock_mechanism (*client) == ZMQ_CURVE)
+        zclock_sleep (1500);
+    else
+        zclock_sleep (200);
 
-    zstr_send (*server, "Hello, World");
-    zpoller_t *poller = zpoller_new (*client, NULL);
+    //  By default PUSH sockets block if there's no peer
+    zsock_set_sndtimeo (*client, 200);
+    zstr_send (*client, "Hello, World");
+
+    zpoller_t *poller = zpoller_new (*server, NULL);
     assert (poller);
-    bool success = (zpoller_wait (poller, 200) == *client);
+    bool success = (zpoller_wait (poller, 400) == *server);
     zpoller_destroy (&poller);
-    zsock_destroy (client);
-    zsock_destroy (server);
-    *server = zsock_new (ZMQ_PUSH);
-    assert (*server);
-    *client = zsock_new (ZMQ_PULL);
-    assert (*client);
+
+    if (renew == true)
+        s_renew_sockets (server, client);
+
     return success;
+}
+
+static void
+s_test_loader (zcertstore_t *certstore)
+{
+    zcertstore_empty (certstore);
+
+    byte public_key [32] = { 105, 76, 150, 58, 214, 191, 218, 65, 50, 172,
+                             131, 188, 247, 211, 136, 170, 227, 26, 57, 170,
+                             185, 63, 246, 225, 177, 230, 12, 8, 134, 136,
+                             105, 106 };
+    byte secret_key [32] = { 245, 217, 172, 73, 106, 28, 195, 17, 218, 132,
+                             135, 209, 99, 240, 98, 232, 7, 137, 244, 100,
+                             242, 23, 29, 114, 70, 223, 83, 1, 113, 207,
+                             132, 149 };
+
+    zcert_t *cert = zcert_new_from (public_key, secret_key);
+    assert (cert);
+    zcertstore_insert (certstore, &cert);
 }
 #endif
 
@@ -491,11 +594,11 @@ zauth_test (bool verbose)
     zsys_dir_create (TESTDIR);
 
     //  Check there's no authentication
-    zsock_t *server = zsock_new (ZMQ_PUSH);
+    zsock_t *server = zsock_new (ZMQ_PULL);
     assert (server);
-    zsock_t *client = zsock_new (ZMQ_PULL);
+    zsock_t *client = zsock_new (ZMQ_PUSH);
     assert (client);
-    bool success = s_can_connect (&server, &client);
+    bool success = s_can_connect (&server, &client, true);
     assert (success);
 
     //  Install the authenticator
@@ -506,35 +609,35 @@ zauth_test (bool verbose)
         zsock_wait (auth);
     }
     //  Check there's no authentication on a default NULL server
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (success);
 
     //  When we set a domain on the server, we switch on authentication
     //  for NULL sockets, but with no policies, the client connection
     //  will be allowed.
     zsock_set_zap_domain (server, "global");
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (success);
 
     //  Blacklist 127.0.0.1, connection should fail
     zsock_set_zap_domain (server, "global");
     zstr_sendx (auth, "DENY", "127.0.0.1", NULL);
     zsock_wait (auth);
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (!success);
 
     //  Whitelist our address, which overrides the blacklist
     zsock_set_zap_domain (server, "global");
     zstr_sendx (auth, "ALLOW", "127.0.0.1", NULL);
     zsock_wait (auth);
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (success);
 
     //  Try PLAIN authentication
     zsock_set_plain_server (server, 1);
     zsock_set_plain_username (client, "admin");
     zsock_set_plain_password (client, "Password");
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (!success);
 
     FILE *password = fopen (TESTDIR "/password-file", "w");
@@ -546,13 +649,13 @@ zauth_test (bool verbose)
     zsock_set_plain_password (client, "Password");
     zstr_sendx (auth, "PLAIN", TESTDIR "/password-file", NULL);
     zsock_wait (auth);
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (success);
 
     zsock_set_plain_server (server, 1);
     zsock_set_plain_username (client, "admin");
     zsock_set_plain_password (client, "Bogus");
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (!success);
 
     if (zsys_has_curve ()) {
@@ -564,14 +667,14 @@ zauth_test (bool verbose)
         assert (server_cert);
         zcert_t *client_cert = zcert_new ();
         assert (client_cert);
-        char *server_key = zcert_public_txt (server_cert);
+        const char *server_key = zcert_public_txt (server_cert);
 
         //  Test without setting-up any authentication
         zcert_apply (server_cert, server);
         zcert_apply (client_cert, client);
         zsock_set_curve_server (server, 1);
         zsock_set_curve_serverkey (client, server_key);
-        success = s_can_connect (&server, &client);
+        success = s_can_connect (&server, &client, true);
         assert (!success);
 
         //  Test CURVE_ALLOW_ANY
@@ -581,10 +684,11 @@ zauth_test (bool verbose)
         zsock_set_curve_serverkey (client, server_key);
         zstr_sendx (auth, "CURVE", CURVE_ALLOW_ANY, NULL);
         zsock_wait (auth);
-        success = s_can_connect (&server, &client);
+        success = s_can_connect (&server, &client, true);
         assert (success);
 
         //  Test full client authentication using certificates
+        zcert_set_meta (client_cert, "Hello", "%s", "World!");
         zcert_apply (server_cert, server);
         zcert_apply (client_cert, client);
         zsock_set_curve_server (server, 1);
@@ -592,15 +696,55 @@ zauth_test (bool verbose)
         zcert_save_public (client_cert, TESTDIR "/mycert.txt");
         zstr_sendx (auth, "CURVE", TESTDIR, NULL);
         zsock_wait (auth);
-        success = s_can_connect (&server, &client);
+        success = s_can_connect (&server, &client, false);
         assert (success);
+
+#if (ZMQ_VERSION >= ZMQ_MAKE_VERSION (4, 1, 0))
+        // Test send/recv certificate metadata
+        zframe_t *frame = zframe_recv (server);
+        assert (frame != NULL);
+        const char *meta = zframe_meta (frame, "Hello");
+        assert (meta != NULL);
+        assert (streq (meta, "World!"));
+        zframe_destroy (&frame);
+        s_renew_sockets(&server, &client);
+#endif
 
         zcert_destroy (&server_cert);
         zcert_destroy (&client_cert);
+
+        // Test custom zcertstore
+        zcertstore_t *certstore = zcertstore_new (NULL);
+        zcertstore_set_loader (certstore, s_test_loader, NULL, NULL);
+        zactor_destroy(&auth);
+        auth = zactor_new (zauth, certstore);
+        assert (auth);
+        if (verbose) {
+            zstr_sendx (auth, "VERBOSE", NULL);
+            zsock_wait (auth);
+        }
+
+        byte public_key [32] = { 105, 76, 150, 58, 214, 191, 218, 65, 50, 172,
+                                 131, 188, 247, 211, 136, 170, 227, 26, 57, 170,
+                                 185, 63, 246, 225, 177, 230, 12, 8, 134, 136,
+                                 105, 106 };
+        byte secret_key [32] = { 245, 217, 172, 73, 106, 28, 195, 17, 218, 132,
+                                 135, 209, 99, 240, 98, 232, 7, 137, 244, 100,
+                                 242, 23, 29, 114, 70, 223, 83, 1, 113, 207,
+                                 132, 149 };
+        zcert_t *shared_cert = zcert_new_from (public_key, secret_key);
+        assert (shared_cert);
+        zcert_apply (shared_cert, server);
+        zcert_apply (shared_cert, client);
+        zsock_set_curve_server (server, 1);
+        zsock_set_curve_serverkey (client, "x?T*N/1Y{8goubv{Ts}#&#f}TXJ//DVe#D2HkoLU");
+        success = s_can_connect (&server, &client, true);
+        assert (success);
+        zcert_destroy (&shared_cert);
     }
     //  Remove the authenticator and check a normal connection works
     zactor_destroy (&auth);
-    success = s_can_connect (&server, &client);
+    success = s_can_connect (&server, &client, true);
     assert (success);
 
     zsock_destroy (&client);

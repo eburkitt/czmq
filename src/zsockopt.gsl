@@ -8,8 +8,8 @@
 
             ****************************************************
             *   GENERATED SOURCE CODE, DO NOT EDIT!!           *
-            *   TO CHANGE THIS, EDIT scripts/sockopts.gsl      *
-            *   AND RUN ./generate in models/.                 *
+            *   TO CHANGE THIS, EDIT src/zsockopt.gsl          *
+            *   AND RUN `gsl sockopts` in src/.                *
             ****************************************************
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -106,7 +106,7 @@ CZMQ_EXPORT void zsockopt_test (bool verbose);
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 .for version
 #if (ZMQ_VERSION_MAJOR == $(major))
@@ -285,9 +285,9 @@ zsockopt_test (bool verbose)
     assert (zocket);
 .       if mode = "rw" | mode = "w"
 .           if ctype = "int"
-    zsocket_set_$(name) (zocket, 1);
+    zsocket_set_$(name) (zocket, $(test_value? 1 :));
 .               if mode = "rw"
-    assert (zsocket_$(name) (zocket) == 1);
+    assert (zsocket_$(name) (zocket) == $(test_value? 1 :));
 .               endif
 .           else
     zsocket_set_$(name) (zocket, "$(test_value?'test':)");

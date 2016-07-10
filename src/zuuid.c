@@ -16,13 +16,12 @@
     The zuuid class generates UUIDs and provides methods for working with
     them. If you build CZMQ with libuuid, on Unix/Linux, it will use that
     library. On Windows it will use UuidCreate(). Otherwise it will use a
-    random number generator to produce convincing imitations of uuids.
+    random number generator to produce convincing imitations of UUIDs.
 @discuss
 @end
 */
 
-#include "platform.h"
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -40,51 +39,50 @@ zuuid_t *
 zuuid_new (void)
 {
     zuuid_t *self = (zuuid_t *) zmalloc (sizeof (zuuid_t));
-    if (self) {
-#if defined (HAVE_UUID)
-#   if defined (__WINDOWS__)
-        UUID uuid;
-        assert (sizeof (uuid) == ZUUID_LEN);
-        UuidCreate (&uuid);
-        zuuid_set (self, (byte *) &uuid);
-#   elif defined (__UTYPE_OPENBSD) || defined (__UTYPE_FREEBSD) || defined (__UTYPE_NETBSD)
-        uuid_t uuid;
-        uint32_t status = 0;
-        uuid_create (&uuid, &status);
-        if (status != uuid_s_ok) {
-            zuuid_destroy (&self);
-            return NULL;
-        }
-        byte buffer [ZUUID_LEN];
-        uuid_enc_be (&buffer, &uuid);
-        zuuid_set (self, buffer);
-#   elif defined (__UTYPE_LINUX) || defined (__UTYPE_OSX)
-        uuid_t uuid;
-        assert (sizeof (uuid) == ZUUID_LEN);
-        uuid_generate (uuid);
-        zuuid_set (self, (byte *) uuid);
-#   else
-#       error "Unknow UNIX TYPE"
-#   endif
-#else
-        //  No UUID system calls, so generate a random string
-        byte uuid [ZUUID_LEN];
+    assert (self);
 
-        int fd = open ("/dev/urandom", O_RDONLY);
-        if (fd != -1) {
-            ssize_t bytes_read = read (fd, uuid, ZUUID_LEN);
-            assert (bytes_read == ZUUID_LEN);
-            close (fd);
-            zuuid_set (self, uuid);
-        }
-        else {
-            //  We couldn't read /dev/urandom and we have no alternative
-            //  strategy
-            zsys_error (strerror (errno));
-            assert (false);
-        }
-#endif
+#if defined (__WINDOWS__)
+    //  Windows always has UUID support
+    UUID uuid;
+    assert (sizeof (uuid) == ZUUID_LEN);
+    UuidCreate (&uuid);
+    zuuid_set (self, (byte *) &uuid);
+#elif defined (__UTYPE_ANDROID) || !defined (HAVE_UUID)
+    //  No UUID system calls, so generate a random string
+    byte uuid [ZUUID_LEN];
+
+    int fd = open ("/dev/urandom", O_RDONLY);
+    if (fd != -1) {
+        ssize_t bytes_read = read (fd, uuid, ZUUID_LEN);
+        assert (bytes_read == ZUUID_LEN);
+        close (fd);
+        zuuid_set (self, uuid);
     }
+    else {
+        //  We couldn't read /dev/urandom and we have no alternative
+        //  strategy
+        zsys_error (strerror (errno));
+        assert (false);
+    }
+#elif defined (__UTYPE_OPENBSD) || defined (__UTYPE_FREEBSD) || defined (__UTYPE_NETBSD)
+    uuid_t uuid;
+    uint32_t status = 0;
+    uuid_create (&uuid, &status);
+    if (status != uuid_s_ok) {
+        zuuid_destroy (&self);
+        return NULL;
+    }
+    byte buffer [ZUUID_LEN];
+    uuid_enc_be (&buffer, &uuid);
+    zuuid_set (self, buffer);
+#elif defined (__UTYPE_LINUX) || defined (__UTYPE_OSX) || defined (__UTYPE_GNU)
+    uuid_t uuid;
+    assert (sizeof (uuid) == ZUUID_LEN);
+    uuid_generate (uuid);
+    zuuid_set (self, (byte *) uuid);
+#else
+#   error "Unknow UNIX TYPE"
+#endif
     return self;
 }
 
@@ -112,8 +110,8 @@ zuuid_t *
 zuuid_new_from (const byte *source)
 {
     zuuid_t *self = (zuuid_t *) zmalloc (sizeof (zuuid_t));
-    if (self)
-        zuuid_set (self, source);
+    assert (self);
+    zuuid_set (self, source);
     return self;
 }
 
@@ -159,8 +157,8 @@ zuuid_set_str (zuuid_t *self, const char *source)
                 return -1;
             if (byte_nbr < ZUUID_LEN) {
                 self->uuid [byte_nbr] = (byte) value;
-                self->str [byte_nbr * 2 + 0] = *source++;
-                self->str [byte_nbr * 2 + 1] = *source++;
+                self->str [byte_nbr * 2 + 0] = toupper(*source++);
+                self->str [byte_nbr * 2 + 1] = toupper(*source++);
                 byte_nbr++;
             }
             else

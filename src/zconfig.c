@@ -53,7 +53,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 //  Structure of our class
 
@@ -93,8 +93,7 @@ zconfig_t *
 zconfig_new (const char *name, zconfig_t *parent)
 {
     zconfig_t *self = (zconfig_t *) zmalloc (sizeof (zconfig_t));
-    if (!self)
-        return NULL;
+    assert (self);
 
     zconfig_set_name (self, name);
     if (parent) {
@@ -241,7 +240,7 @@ void
 zconfig_set_value (zconfig_t *self, const char *format, ...)
 {
     assert (self);
-    free (self->value);
+    zstr_free (&self->value);
     if (format) {
         va_list argptr;
         va_start (argptr, format);
@@ -359,13 +358,15 @@ zconfig_execute (zconfig_t *self, zconfig_fct handler, void *arg)
 }
 
 
-//  Return number of bytes processed, or zero
+//  Return number of bytes processed if successful, otherwise -1.
 
 static int
 s_config_execute (zconfig_t *self, zconfig_fct handler, void *arg, int level)
 {
     assert (self);
     int size = handler (self, arg, level);
+    if (size == -1)
+        return -1; // fail early
 
     //  Process all children in one go, as a list
     zconfig_t *child = self->child;
@@ -463,7 +464,7 @@ s_config_printf (zconfig_t *self, void *arg, char *format, ...)
             fprintf ((FILE *) arg, "%s", string);
     }
     size_t size = strlen (string);
-    free (string);
+    zstr_free (&string);
     if (size > INT_MAX)
         return -1;
 
@@ -535,7 +536,7 @@ zconfig_savef (zconfig_t *self, const char *format, ...)
     va_end (argptr);
     if (filename) {
         int rc = zconfig_save (self, filename);
-        free (filename);
+        zstr_free (&filename);
         return rc;
     }
     else
@@ -898,7 +899,7 @@ zconfig_set_comment (zconfig_t *self, const char *format, ...)
         va_end (argptr);
 
         zlist_append (self->comments, string);
-        free (string);
+        zstr_free (&string);
     }
     else
         zlist_destroy (&self->comments);

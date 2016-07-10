@@ -3,16 +3,20 @@
     description = "The high-level C binding for 0MQ"
     script = "zproject.gsl"
     email = "zeromq-dev@lists.zeromq.org"
+    license = "MPLv2"
+    url = "https://github.com/zeromq/czmq"
+    repository = "https://github.com/zeromq/czmq"
     >
     <include filename = "license.xml" />
     <version major = "3" minor = "0" patch = "3" />
     <use project = "libzmq" />
     <use project = "uuid" optional = "1" implied = "1" />
+    <use project = "systemd" optional = "1" implied = "1" min_major = "200" />
+    <target name = "*" />
 
+    <!-- These classes have an API model -->
     <class name = "zactor" />
-    <class name = "zauth" />
     <class name = "zarmour" />
-    <class name = "zbeacon" />
     <class name = "zcert" />
     <class name = "zcertstore" />
     <class name = "zchunk" />
@@ -23,22 +27,29 @@
     <class name = "zdir_patch" />
     <class name = "zfile" />
     <class name = "zframe" />
-    <class name = "zgossip" />
+    <class name = "zhash" />
     <class name = "zhashx" />
     <class name = "ziflist" />
+    <class name = "zlist" />
     <class name = "zlistx" />
     <class name = "zloop" />
-    <class name = "zmonitor" />
     <class name = "zmsg" />
     <class name = "zpoller" />
-    <class name = "zproxy" />
-    <class name = "zrex" />
+    <class name = "zproc" />
     <class name = "zsock" />
-    <class name = "zsock_option" />
     <class name = "zstr" />
-    <class name = "zsys" />
+    <class name = "ztimerset" />
     <class name = "ztrie" />
     <class name = "zuuid" />
+
+    <!-- These classes have no API model -->
+    <class name = "zauth" state = "stable" />
+    <class name = "zbeacon" state = "stable" />
+    <class name = "zgossip" state = "stable" />
+    <class name = "zmonitor" state = "stable" />
+    <class name = "zproxy" state = "stable" />
+    <class name = "zrex" state = "stable" />
+    <class name = "zsys" state = "stable" />
 
     <!-- Models that we build using GSL -->
     <model name = "sockopts" />
@@ -47,9 +58,9 @@
     <class name = "zgossip_msg" private = "1" />
 
     <!-- Other source files in src that we need to package -->
+    <extra name = "zsock_option.inc" />
     <extra name = "zgossip_engine.inc" />
     <extra name = "zhash_primes.inc" />
-    <extra name = "zclass_example.xml" />
     <extra name = "foreign/sha1/sha1.inc_c" />
     <extra name = "foreign/sha1/sha1.h" />
     <extra name = "foreign/slre/slre.inc_c" />
@@ -57,19 +68,26 @@
     <extra name = "foreign/slre/readme.txt" />
 
     <!-- Deprecated V2 API, remove some time after 3.0 stability -->
-    <class name = "zauth_v2" />
-    <class name = "zbeacon_v2" />
-    <class name = "zctx" />
-    <class name = "zhash" />
-    <class name = "zlist" />
-    <class name = "zmonitor_v2" />
-    <class name = "zmutex" />
-    <class name = "zproxy_v2" />
-    <class name = "zsocket" />
-    <class name = "zsockopt" />
-    <class name = "zthread" />
+    <class name = "zauth_v2" state = "legacy" />
+    <class name = "zbeacon_v2" state = "legacy" />
+    <class name = "zctx" state = "legacy" />
+    <class name = "zmonitor_v2" state = "legacy" />
+    <class name = "zmutex" state = "legacy" />
+    <class name = "zproxy_v2" state = "legacy" />
+    <class name = "zsocket" state = "legacy" />
+    <class name = "zsockopt" state = "legacy" />
+    <class name = "zthread" state = "legacy" />
 
     <!-- Command-line utilities -->
     <main name = "zmakecert" />
-    <main name = "test_zgossip" private = "1" />
+
+    <!-- target configuration -->
+    <target name = "nuget">
+        <option name = "id" value = "czmq_vc120" />
+        <option name = "platformtoolset" value = "v120" />
+        <option name = "dependency">
+            <item name = "libzmq_vc120" value = "4.2.0.0" />
+        </option>
+    </target>
+
 </project>

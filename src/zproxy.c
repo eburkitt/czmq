@@ -1,4 +1,4 @@
-﻿/*  =========================================================================
+/*  =========================================================================
     zproxy - run a steerable proxy in the background
 
     Copyright (c) the Contributors as noted in the AUTHORS file.
@@ -22,7 +22,7 @@
 @end
 */
 
-#include "../include/czmq.h"
+#include "czmq_classes.h"
 
 typedef enum proxy_socket {
     NONE = -1,
@@ -53,12 +53,25 @@ typedef struct {
     bool verbose;               //  Verbose logging enabled?
 } self_t;
 
+
+static self_t *
+s_self_new (zsock_t *pipe)
+{
+    self_t *self = (self_t *) zmalloc (sizeof (self_t));
+    assert (self);
+    self->pipe = pipe;
+    self->poller = zpoller_new (self->pipe, NULL);
+    assert (self->poller);
+    return self;
+}
+
 static void
 s_self_destroy (self_t **self_p)
 {
     assert (self_p);
     if (*self_p) {
         self_t *self = *self_p;
+        zpoller_destroy (&self->poller);
         zsock_destroy (&self->frontend);
         zsock_destroy (&self->backend);
         zsock_destroy (&self->capture);
@@ -68,23 +81,9 @@ s_self_destroy (self_t **self_p)
             zstr_free (&self->public_key [index]);
             zstr_free (&self->secret_key [index]);
         }
-        zpoller_destroy (&self->poller);
         free (self);
         *self_p = NULL;
     }
-}
-
-static self_t *
-s_self_new (zsock_t *pipe)
-{
-    self_t *self = (self_t *) zmalloc (sizeof (self_t));
-    if (self) {
-        self->pipe = pipe;
-        self->poller = zpoller_new (self->pipe, NULL);
-        if (!self->poller)
-            s_self_destroy (&self);
-    }
-    return self;
 }
 
 static zsock_t *
@@ -119,9 +118,9 @@ s_self_create_socket (self_t *self, char *type_name, char *endpoints, proxy_sock
         if (self->auth_type [selected_socket] == AUTH_CURVE) {
             // Apply certificate keys
             char *public_key = self->public_key [selected_socket];
-            assert(public_key);
+            assert (public_key);
             char *secret_key = self->secret_key [selected_socket];
-            assert(secret_key);
+            assert (secret_key);
             zsock_set_curve_publickey (sock, public_key);
             zsock_set_curve_secretkey (sock, secret_key);
 
@@ -180,9 +179,10 @@ s_self_selected_socket (zmsg_t *request)
         zsys_error ("zproxy: invalid proxy socket selection: %s", socket_name);
         assert (false);
     }
-
+    zstr_free (&socket_name);
     return socket;
 }
+
 
 static void
 s_self_configure (self_t *self, zsock_t **sock_p, zmsg_t *request, proxy_socket selected_socket)
@@ -198,9 +198,17 @@ s_self_configure (self_t *self, zsock_t **sock_p, zmsg_t *request, proxy_socket 
     assert (*sock_p == NULL);
     *sock_p = s_self_create_socket (self, type_name, endpoints, selected_socket);
     assert (*sock_p);
-    zpoller_add (self->poller, *sock_p);
     zstr_free (&type_name);
     zstr_free (&endpoints);
+}
+
+static void
+s_self_add_to_poller_when_configured (self_t *self)
+{
+    if (self->frontend && self->backend) {
+        zpoller_add(self->poller, self->frontend);
+        zpoller_add(self->poller, self->backend);
+    }
 }
 
 //  --------------------------------------------------------------------------
@@ -221,11 +229,13 @@ s_self_handle_pipe (self_t *self)
 
     if (streq (command, "FRONTEND")) {
         s_self_configure (self, &self->frontend, request, FRONTEND);
+        s_self_add_to_poller_when_configured (self);
         zsock_signal (self->pipe, 0);
     }
     else
     if (streq (command, "BACKEND")) {
         s_self_configure (self, &self->backend, request, BACKEND);
+        s_self_add_to_poller_when_configured (self);
         zsock_signal (self->pipe, 0);
     }
     else
@@ -299,6 +309,7 @@ s_self_handle_pipe (self_t *self)
     return 0;
 }
 
+
 //  --------------------------------------------------------------------------
 //  Switch messages from an input socket to an output socket until there are
 //  no messages left waiting. We use this loop rather than zmq_poll, to reduce
@@ -332,6 +343,7 @@ s_self_switch (self_t *self, zsock_t *input, zsock_t *output)
     }
 }
 
+
 //  --------------------------------------------------------------------------
 //  zproxy() implements the zproxy actor interface
 
@@ -360,6 +372,7 @@ zproxy (zsock_t *pipe, void *unused)
     s_self_destroy (&self);
 }
 
+
 //  --------------------------------------------------------------------------
 //  Selftest
 
@@ -386,7 +399,7 @@ s_create_test_sockets (zactor_t **proxy, zsock_t **faucet, zsock_t **sink, bool 
 }
 
 static int
-s_get_available_port ()
+s_get_available_port (void)
 {
     int port_nbr = -1;
     int attempts = 0;
@@ -400,12 +413,10 @@ s_get_available_port ()
         port_nbr = zsock_bind (server, LOCALENDPOINT, port_nbr);
         zsock_destroy (&server);
     }
-
     if (port_nbr < 0) {
         zsys_error ("zproxy: failed to find an available port number");
         assert (false);
     }
-
     return port_nbr;
 }
 
@@ -423,9 +434,13 @@ s_can_connect (zactor_t **proxy, zsock_t **faucet, zsock_t **sink, const char *f
     rc = zsock_connect (*sink, "%s", backend);
     assert (rc == 0);
     zstr_send (*faucet, "Hello, World");
+    if (zsock_mechanism (*faucet) == ZMQ_CURVE)
+        zclock_sleep (3000);
+    else
+        zclock_sleep (200);
     zpoller_t *poller = zpoller_new (*sink, NULL);
     assert (poller);
-    bool success = (zpoller_wait (poller, 200) == *sink);
+    bool success = (zpoller_wait (poller, 400) == *sink);
     zpoller_destroy (&poller);
     s_create_test_sockets (proxy, faucet, sink, verbose);
 
@@ -439,7 +454,7 @@ s_bind_test_sockets (zactor_t *proxy, char **frontend, char **backend)
     zstr_free (backend);
     assert (proxy);
 
-    srandom (time (NULL) ^ *(int *) proxy);
+    srandom ((uint) (time (NULL) ^ *(int *) proxy));
     *frontend = zsys_sprintf (LOCALENDPOINT, s_get_available_port ());
     *backend = zsys_sprintf (LOCALENDPOINT, s_get_available_port ());
 
@@ -527,6 +542,19 @@ zproxy_test (bool verbose)
     zsock_destroy (&sink);
     zsock_destroy (&capture);
     zactor_destroy (&proxy);
+
+    //  Test socket creation dependency
+    proxy = zactor_new (zproxy, NULL);
+    assert (proxy);
+
+    sink = zsock_new_sub (">ipc://backend", "whatever");
+    assert (sink);
+
+    zstr_sendx (proxy, "BACKEND", "XPUB", "ipc://backend", NULL);
+    zsock_wait (proxy);
+
+    zsock_destroy(&sink);
+    zactor_destroy(&proxy);
 
 #if (ZMQ_VERSION_MAJOR == 4)
     // Test authentication functionality
@@ -632,8 +660,8 @@ zproxy_test (bool verbose)
         assert (server_cert);
         zcert_t *client_cert = zcert_new ();
         assert (client_cert);
-        char *public_key = zcert_public_txt (server_cert);
-        char *secret_key = zcert_secret_txt (server_cert);
+        const char *public_key = zcert_public_txt (server_cert);
+        const char *secret_key = zcert_secret_txt (server_cert);
 
         //  Try CURVE authentication
 
@@ -683,11 +711,17 @@ zproxy_test (bool verbose)
     success = s_can_connect (&proxy, &faucet, &sink, frontend, backend, verbose);
     assert (success);
 
+    //  Cleanup
     zsock_destroy (&faucet);
     zsock_destroy (&sink);
     zactor_destroy (&proxy);
     zstr_free (&frontend);
     zstr_free (&backend);
+
+    //  Delete temporary directory and test files
+    zsys_file_delete (TESTDIR "/password-file");
+    zsys_file_delete (TESTDIR "/mycert.txt");
+    zsys_dir_delete (TESTDIR);
 #endif
     //  @end
     printf ("OK\n");

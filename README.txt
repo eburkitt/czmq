@@ -3,8 +3,9 @@
 
 # CZMQ - High-level C binding for 0MQ
 
-[![Build Status](https://travis-ci.org/zeromq/czmq.png?branch=master)](https://travis-ci.org/zeromq/czmq)
-[![Build status](https://ci.appveyor.com/api/projects/status/q7y22juu3pnl5wq6?svg=true)](https://ci.appveyor.com/project/zeromq/czmq)
+| Linux & MacOSX | Windows  | Chat |
+|:--------------:|:--------:|:----:|
+|[![Build Status](https://travis-ci.org/zeromq/czmq.png?branch=master)](https://travis-ci.org/zeromq/czmq)|[![Build status](https://ci.appveyor.com/api/projects/status/q7y22juu3pnl5wq6?svg=true)](https://ci.appveyor.com/project/zeromq/czmq)|<a target="_blank" href="http://webchat.freenode.net?channels=%23zeromq&uio=d4"><img src="https://cloud.githubusercontent.com/assets/493242/14886493/5c660ea2-0d51-11e6-8249-502e6c71e9f2.png" height = "20" /></a>|
 
 ## Contents
 
@@ -66,28 +67,50 @@ To report an issue, use the [CZMQ issue tracker](https://github.com/zeromq/czmq/
 
 ### Building and Installing
 
-Here's how to build CZMQ from GitHub (building from packages is very similar, you don't clone a repo but unpack a tarball), including the libsodium (for security) and libzmq (ZeroMQ core) libraries:
+To start with, you need at least these packages:
 
-    git clone git://github.com/jedisct1/libsodium.git
-    cd libsodium
-    ./autogen.sh
-    ./configure && make check
-    sudo make install
-    sudo ldconfig
-    cd ..
+* {{git-all}} -- git is how we share code with other people.
+
+* {{build-essential}}, {{libtool}}, {{pkg-config}} - the C compiler and related tools.
+
+* {{autotools-dev}}, {{autoconf}}, {{automake}} - the GNU autoconf makefile generators.
+
+* {{cmake}} - the CMake makefile generators (an alternative to autoconf).
+
+Plus some others:
+
+* {{uuid-dev}}, {{libpcre3-dev}} - utility libraries.
+
+* {{valgrind}} - a useful tool for checking your code.
+
+* {{pkg-config}} - an optional useful tool to make building with dependencies easier.
+
+Which we install like this (using the Debian-style apt-get package manager):
+
+    sudo apt-get update
+    sudo apt-get install -y \
+        git-all build-essential libtool \
+        pkg-config autotools-dev autoconf automake cmake \
+        uuid-dev libpcre3-dev valgrind
+
+    # only execute this next line if interested in updating the man pages as well (adds to build time):
+    sudo apt-get install -y asciidoc
+
+Here's how to build CZMQ from GitHub (building from packages is very similar, you don't clone a repo but unpack a tarball), including the libzmq (ZeroMQ core) library:
 
     git clone git://github.com/zeromq/libzmq.git
     cd libzmq
     ./autogen.sh
-    ./configure && make check
+    # do not specify "--with-libsodium" if you prefer to use internal tweetnacl security implementation (recommended for development)
+    ./configure --with-libsodium
+    make check
     sudo make install
     sudo ldconfig
     cd ..
 
     git clone git://github.com/zeromq/czmq.git
     cd czmq
-    ./autogen.sh
-    ./configure && make check
+    ./autogen.sh && ./configure && make check
     sudo make install
     sudo ldconfig
     cd ..
@@ -101,17 +124,76 @@ And then to build CZMQ against this installation of libzmq:
 
     export CFLAGS=-I$HOME/local/include
     export LDFLAGS=-L$HOME/local/lib64
+    export PKG_CONFIG_PATH=$HOME/local/lib64/pkgconfig
     ./configure
+
+NOTE: the PKG_CONFIG_PATH is not mandatory, and the actual directory might be different. If you cannot or do not want to use pkg-config, please make sure to MANUALLY add all the necessary CFLAGS and LDFLAGS from all dependencies (for example -DZMQ_BUILD_DRAFT_API=1 if you want the DRAFT APIs).
 
 You will need the pkg-config, libtool, and autoreconf packages. After building, run the CZMQ selftests:
 
     make check
 
+
+### Building on Windows
+
+To start with, you need MS Visual Studio (C/C++). The free community edition works well.
+
+Then, install git, and make sure it works from a DevStudio command prompt:
+
+```
+git
+```
+
+Now let's build CZMQ from GitHub:
+
+```
+    git clone --depth 1 -b stable https://github.com/jedisct1/libsodium.git
+    cd libsodium\builds\msvc\build
+    buildall.bat
+    cd ..\..\..\..
+
+    :: if libsodium is on disk, the Windows build of libzmq will automatically use it
+    git clone git://github.com/zeromq/libzmq.git
+    cd libzmq\builds\msvc
+    configure.bat
+    cd build
+    buildall.bat
+    cd ..\..\..\..
+
+    git clone git://github.com/zeromq/czmq.git
+    cd czmq\builds\msvc
+    configure.bat
+    cd build
+    buildall.bat
+    cd ..\..\..\..
+```
+
+Let's test by running `czmq_selftest`:
+
+```
+   czmq>dir/s/b czmq_selftest.exe
+   czmq\builds\msvc\vs2013\DebugDEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\DebugLEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\DebugSEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\ReleaseDEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\ReleaseLEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\ReleaseSEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\DebugDEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\DebugLEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\DebugSEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\ReleaseDEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\ReleaseLEXE\czmq_selftest.exe
+   czmq\builds\msvc\vs2013\x64\ReleaseSEXE\czmq_selftest.exe
+
+    :: select your choice and run it
+    czmq\builds\msvc\vs2013\x64\ReleaseDEXE\czmq_selftest.exe
+```
+
 ### Linking with an Application
 
 Include `czmq.h` in your application and link with libczmq. Here is a typical gcc link command:
 
-    gcc -lczmq -lzmq myapp.c -o myapp
+    gcc myapp.c -o myapp -lczmq -lzmq
 
 ### Use from Other Languages
 
@@ -153,12 +235,13 @@ This is the API provided by CZMQ v3.x, in alphabetical order.
 .pull doc/zmonitor.doc
 .pull doc/zmsg.doc
 .pull doc/zpoller.doc
+.pull doc/zproc.doc
 .pull doc/zproxy.doc
 .pull doc/zrex.doc
 .pull doc/zsock.doc
-.pull doc/zsock_option.doc
 .pull doc/zstr.doc
 .pull doc/zsys.doc
+.pull doc/ztimerset.doc
 .pull doc/ztrie.doc
 .pull doc/zuuid.doc
 

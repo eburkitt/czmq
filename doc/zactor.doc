@@ -19,6 +19,9 @@ Please add @discuss section in ../src/zactor.c.
 
 This is the class interface:
 
+```h
+    //  This is a stable class, and may not change except for emergencies. It
+    //  is provided in stable builds.
     // Actors get a pipe and arguments from caller
     typedef void (zactor_fn) (
         zsock_t *pipe, void *args);
@@ -39,7 +42,7 @@ This is the class interface:
     //  Receive a zmsg message from the actor. Returns NULL if the actor 
     //  was interrupted before the message could be received, or if there
     //  was a timeout on the actor.                                      
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT zmsg_t *
         zactor_recv (zactor_t *self);
     
@@ -61,9 +64,12 @@ This is the class interface:
     //  Self test of this class.
     CZMQ_EXPORT void
         zactor_test (bool verbose);
+    
+```
 
 This is the class self test code:
 
+```c
     zactor_t *actor = zactor_new (echo_actor, "Hello, World");
     assert (actor);
     zstr_sendx (actor, "ECHO", "This is a string", NULL);
@@ -71,4 +77,5 @@ This is the class self test code:
     assert (streq (string, "This is a string"));
     free (string);
     zactor_destroy (&actor);
+```
 

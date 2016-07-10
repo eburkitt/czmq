@@ -7,14 +7,15 @@ Please add @discuss section in ../src/zdir_patch.c.
 
 This is the class interface:
 
-    typedef enum {
-        ZDIR_PATCH_CREATE = 1,
-        ZDIR_PATCH_DELETE = 2
-    } zdir_patch_op_t;
+```h
+    //  This is a stable class, and may not change except for emergencies. It
+    //  is provided in stable builds.
+    #define ZDIR_PATCH_CREATE 1                 // Creates a new file
+    #define ZDIR_PATCH_DELETE 2                 // Delete a file
     
     //  Create new patch
     CZMQ_EXPORT zdir_patch_t *
-        zdir_patch_new (const char *path, zfile_t *file, zdir_patch_op_t op, const char *alias);
+        zdir_patch_new (const char *path, zfile_t *file, int op, const char *alias);
     
     //  Destroy a patch
     CZMQ_EXPORT void
@@ -22,7 +23,7 @@ This is the class interface:
     
     //  Create copy of a patch. If the patch is null, or memory was exhausted,
     //  returns null.                                                         
-    //  The caller is responsible for destroying the return value when finished with it.
+    //  Caller owns return value and must destroy it when done.
     CZMQ_EXPORT zdir_patch_t *
         zdir_patch_dup (zdir_patch_t *self);
     
@@ -35,7 +36,7 @@ This is the class interface:
         zdir_patch_file (zdir_patch_t *self);
     
     //  Return operation
-    CZMQ_EXPORT zdir_patch_op_t
+    CZMQ_EXPORT int
         zdir_patch_op (zdir_patch_t *self);
     
     //  Return patch virtual file path
@@ -53,9 +54,12 @@ This is the class interface:
     //  Self test of this class.
     CZMQ_EXPORT void
         zdir_patch_test (bool verbose);
+    
+```
 
 This is the class self test code:
 
+```c
     zfile_t *file = zfile_new (".", "bilbo");
     assert (file);
     zdir_patch_t *patch = zdir_patch_new (".", file, patch_create, "/");
@@ -67,4 +71,5 @@ This is the class self test code:
     assert (streq (zfile_filename (file, "."), "bilbo"));
     assert (streq (zdir_patch_vpath (patch), "/bilbo"));
     zdir_patch_destroy (&patch);
+```
 
