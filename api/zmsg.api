@@ -126,7 +126,17 @@
     <method name = "pushstrf">
         Push formatted string as new frame to front of message.
         Returns 0 on success, -1 on error.
+<!--        <argument name = "format" type = "string" variadic = "1" /> -->
         <argument name = "format" type = "format" />
+        <return type = "integer" />
+    </method>
+
+    <method name = "vpushstrf">
+        Push formatted string as new frame to front of message.
+        This is a va_list version of zmsg_pushstrf (), so please
+        consult its documentation for the details.
+        <argument name = "format" type = "string" />
+        <argument name = "argptr" type = "va_list" />
         <return type = "integer" />
     </method>
 
@@ -134,6 +144,15 @@
         Push formatted string as new frame to end of message.
         Returns 0 on success, -1 on error.
         <argument name = "format" type = "format" />
+        <return type = "integer" />
+    </method>
+
+    <method name = "vaddstrf">
+        Push formatted string as new frame to end of message.
+        This is a va_list version of zmsg_addstrf (), so please
+        consult its documentation for the details.
+        <argument name = "format" type = "string" />
+        <argument name = "argptr" type = "va_list" />
         <return type = "integer" />
     </method>
 
