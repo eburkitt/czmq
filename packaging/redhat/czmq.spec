@@ -18,11 +18,12 @@ License:        MPLv2
 URL:            https://github.com/zeromq/czmq
 Source0:        %{name}-%{version}.tar.gz
 Group:          System/Libraries
+BuildRequires:  ghostscript-core
 BuildRequires:  asciidoc
 BuildRequires:  automake
 BuildRequires:  autoconf
 BuildRequires:  libtool
-BuildRequires:  pkg-config
+BuildRequires:  pkgconfig
 BuildRequires:  systemd-devel
 BuildRequires:  xmlto
 BuildRequires:  zeromq-devel
