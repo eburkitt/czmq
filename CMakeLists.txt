@@ -16,22 +16,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS 1)
 # Select flags
 SET(CMAKE_C_FLAGS_RELEASE "-O3")
 
-# Will be used to add flags to pkg-config useful when apps want to statically link
-set(pkg_config_libs_private "")
-
 ########################################################################
 # options
 ########################################################################
-if (NOT CMAKE_BUILD_TYPE)
-    if (EXISTS "${SOURCE_DIR}/.git")
-        set (CMAKE_BUILD_TYPE Debug)
-    else ()
-        set (CMAKE_BUILD_TYPE Release)
-    endif ()
-endif ()
-if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+if (EXISTS "${SOURCE_DIR}/.git")
+    set (CMAKE_BUILD_TYPE Debug)
     OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" ON)
 else ()
+    set (CMAKE_BUILD_TYPE Release)
     OPTION (ENABLE_DRAFTS "Build and install draft classes and methods" OFF)
 endif ()
 IF (ENABLE_DRAFTS)
@@ -97,7 +89,6 @@ find_package(libzmq REQUIRED)
 IF (LIBZMQ_FOUND)
     include_directories(${LIBZMQ_INCLUDE_DIRS})
     list(APPEND MORE_LIBRARIES ${LIBZMQ_LIBRARIES})
-    set(pkg_config_libs_private "${pkg_config_libs_private} -lzmq")
 ELSE (LIBZMQ_FOUND)
     message( FATAL_ERROR "libzmq not found." )
 ENDIF (LIBZMQ_FOUND)
@@ -109,7 +100,6 @@ find_package(uuid)
 IF (UUID_FOUND)
     include_directories(${UUID_INCLUDE_DIRS})
     list(APPEND MORE_LIBRARIES ${UUID_LIBRARIES})
-    set(pkg_config_libs_private "${pkg_config_libs_private} -luuid")
     add_definitions(-DHAVE_UUID)
     list(APPEND OPTIONAL_LIBRARIES ${UUID_LIBRARIES})
 ENDIF (UUID_FOUND)
@@ -121,7 +111,6 @@ find_package(systemd)
 IF (SYSTEMD_FOUND)
     include_directories(${SYSTEMD_INCLUDE_DIRS})
     list(APPEND MORE_LIBRARIES ${SYSTEMD_LIBRARIES})
-    set(pkg_config_libs_private "${pkg_config_libs_private} -lsystemd")
     add_definitions(-DHAVE_LIBSYSTEMD)
     list(APPEND OPTIONAL_LIBRARIES ${SYSTEMD_LIBRARIES})
 ENDIF (SYSTEMD_FOUND)
@@ -255,7 +244,7 @@ if (NOT DEFINED BUILD_SHARED_LIBS)
 endif()
 add_library(czmq ${czmq_sources})
 set_target_properties(czmq
-    PROPERTIES DEFINE_SYMBOL "CZMQ_EXPORTS"
+    PROPERTIES DEFINE_SYMBOL "LIBCZMQ_EXPORTS"
 )
 set_target_properties(czmq
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${SOURCE_DIR}/src"
@@ -335,8 +324,8 @@ set(TOTAL_TIMEOUT 600 CACHE STRING "Timout of the total testsuite")
 
 if(UNIX)
     find_program(MEMORYCHECK_COMMAND valgrind)
-    set(MEMORYCHECK_COMMAND_OPTIONS "--leak-check=full --show-reachable=yes
-                                     --error-exitcode=1
+    set(MEMORYCHECK_COMMAND_OPTIONS "--leak-check=full --show-reachable=yes \
+                                     --error-exitcode=1 \
                                      --suppressions=src/.valgrind.supp")
 endif()
 
