@@ -10,6 +10,16 @@
 #    file, You can obtain one at http://mozilla.org/MPL/2.0/.           
 #
 
+# To build with draft APIs, use "--with drafts" in rpmbuild for local builds or add
+#   Macros:
+#   %_with_drafts 1
+# at the BOTTOM of the OBS prjconf
+%bcond_with drafts
+%if %{with drafts}
+%define DRAFTS yes
+%else
+%define DRAFTS no
+%endif
 Name:           czmq
 Version:        3.0.3
 Release:        1
@@ -18,12 +28,15 @@ License:        MPLv2
 URL:            https://github.com/zeromq/czmq
 Source0:        %{name}-%{version}.tar.gz
 Group:          System/Libraries
+# Note: ghostscript is required by graphviz which is required by
+#       asciidoc. On Fedora 24 the ghostscript dependencies cannot
+#       be resolved automatically. Thus add working dependency here!
+BuildRequires:  ghostscript
 BuildRequires:  asciidoc
 BuildRequires:  automake
 BuildRequires:  autoconf
 BuildRequires:  libtool
-BuildRequires:  pkg-config
-BuildRequires:  systemd-devel
+BuildRequires:  pkgconfig
 BuildRequires:  xmlto
 BuildRequires:  zeromq-devel
 BuildRequires:  uuid-devel
@@ -67,13 +80,15 @@ This package contains development files.
 %{_libdir}/pkgconfig/libczmq.pc
 %{_mandir}/man3/*
 %{_mandir}/man7/*
+%{_datadir}/zproject/
+%{_datadir}/zproject/czmq/
 
 %prep
 %setup -q
 
 %build
 sh autogen.sh
-%{configure} --with-systemd-units
+%{configure} --enable-drafts=%{DRAFTS}
 make %{_smp_mflags}
 
 %install

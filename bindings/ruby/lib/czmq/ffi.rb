@@ -22,8 +22,10 @@ module CZMQ
 
     begin
       lib_name = 'libczmq'
-      lib_paths = ['/usr/local/lib', '/opt/local/lib', '/usr/lib64']
-        .map { |path| "#{path}/#{lib_name}.#{::FFI::Platform::LIBSUFFIX}" }
+      lib_dirs = ['/usr/local/lib', '/opt/local/lib', '/usr/lib64']
+      env_name = "#{lib_name.upcase}_PATH"
+      lib_dirs = [*ENV[env_name].split(':'), *lib_dirs] if ENV[env_name]
+      lib_paths = lib_dirs.map { |path| "#{path}/#{lib_name}.#{::FFI::Platform::LIBSUFFIX}" }
       ffi_lib lib_paths + [lib_name]
       @available = true
     rescue LoadError
@@ -991,7 +993,7 @@ module CZMQ
       attach_function :zsock_tcp_accept_filter, [:pointer], :pointer, **opts
       attach_function :zsock_set_tcp_accept_filter, [:pointer, :string], :void, **opts
       attach_function :zsock_rcvmore, [:pointer], :int, **opts
-      attach_function :zsock_fd, [:pointer], :pointer, **opts
+      attach_function :zsock_fd, [:pointer], (::FFI::Platform.unix? ? :int : :uint64_t), **opts
       attach_function :zsock_events, [:pointer], :int, **opts
       attach_function :zsock_last_endpoint, [:pointer], :pointer, **opts
       attach_function :zsock_test, [:bool], :void, **opts

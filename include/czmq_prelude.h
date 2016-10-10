@@ -237,9 +237,9 @@
 
 #if (defined (__MSDOS__))
 #   if (defined (__WINDOWS__))
-#       if (_WIN32_WINNT < 0x0501)
+#       if (_WIN32_WINNT < 0x0600)
 #           undef _WIN32_WINNT
-#           define _WIN32_WINNT 0x0501
+#           define _WIN32_WINNT 0x0600
 #       endif
 #       if (!defined (FD_SETSIZE))
 #           define FD_SETSIZE 1024      //  Max. filehandles/sockets
@@ -546,7 +546,7 @@ safe_malloc (size_t size, const char *file, unsigned line)
 //  results, compile all classes so you see dangling object allocations.
 //  _ZMALLOC_PEDANTIC does the same thing, but its intention is to propagate
 //  out of memory condition back up the call stack.
-#if defined _ZMALLOC_DEBUG || _ZMALLOC_PEDANTIC
+#if defined (_ZMALLOC_DEBUG) || defined (_ZMALLOC_PEDANTIC)
 #   define zmalloc(size) calloc(1,(size))
 #else
 #   define zmalloc(size) safe_malloc((size), __FILE__, __LINE__)
